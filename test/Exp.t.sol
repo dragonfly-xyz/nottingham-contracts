@@ -23,10 +23,51 @@ abstract contract GameComponent {
         }
         _;
     }
+
+    function _burnRandomGas(uint256 min, uint256 max) internal {
+        assert(max >= min);
+        unchecked {
+            uint256 g = min + (_randomUint256() % (max - min));
+            try this.crash{gas: g}() {
+                assert(false);
+            } catch {}
+        }
+    }
+
+    function crash() external pure {
+        assembly ("memory-safe") {
+            invalid();
+        }
+    }
+
+    function _randomUint256() internal view returns (uint256 r) {
+        assembly ("memory-safe") {
+            let p := mload(0x40)
+            mstore(p, or(shl(128, msize()), gas()))
+            p := add(p, 0x20)
+            mstore(p, origin())
+            p := add(p, 0x20)
+            mstore(p, codehash())
+            p := add(p, 0x20)
+            calldatacopy(p, 0, calldatasize())
+            p := add(p, calldatasize())
+            r := keccak256(mload(0x40), sub(p, mload(0x40)))
+        }
+    }
+}
+
+interface IToken {
+    function name() external view returns (string memory);
+    function balanceOf(address owner) external view returns (uint256);
+    function transferFrom(address from, address to, uint256 amount) external;
+}
+
+abstract contract GameConstants {
+    uint256 constant RAISE_ARG0 = 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;
 }
 
 // Gold needs to be a token too for hooks.
-contract Token {
+contract Token is IToken, GameConstants {
     error InsufficientBalanceError(address from, address to, uint256 overdraft);
     
     string public name;
@@ -38,7 +79,7 @@ contract Token {
         external
         onlyOwnerOrGameComponent(from)
     {
-        GAME.raise(abi.encodeCall(IGameHooks.onBeforeTransfer, (this, from, to, amount)));
+        GAME.raise(abi.encodeCall(IGameHooks.onBeforeTransfer, (RAISE_ARG0, this, from, to, amount)));
         unchecked {
             uint256 fromBal = balanceOf[from];
             // From address(0) is a mint.
@@ -53,11 +94,31 @@ contract Token {
                 balanceOf[to] += amount;
             }
         }
-        GAME.raise(abi.encodeCall(IGameHooks.onAfterTransfer, (this, from, to, amount)));
+        GAME.raise(abi.encodeCall(IGameHooks.onAfterTransfer, (RAISE_ARG0, this, from, to, amount)));
     }
 }
 
-contract Game {
+interface IGameHooks {
+    function onBeforeBorrow(address caller, IToken, uint256 borrowAmount, uint256 fee, bytes hookData) external view returns (bytes memory nextHookData);
+    function onAfterBorrow(address caller, IToken, uint256 borrowAmount, uint256 fee, bytes hookData) external view returns (bytes memory nextHookData);
+    function onBeforeDeposit(address caller, IToken, uint256 depositAmount, uint256 yield, bytes hookData) external view returns (bytes memory nextHookData);
+    function onAfterDeposit(address caller, IToken, uint256 depositAmount, uint256 yield, bytes hookData) external view returns (bytes memory nextHookData);
+    function onBeforeWithdraw(address caller, IToken, uint256 withdrawAmount, uint256 yield, bytes hookData) external view returns (bytes memory nextHookData);
+    function onAfterWithdraw(address caller, IToken, uint256 withdrawAmount, uint256 yield, bytes hookData) external view returns (bytes memory nextHookData);
+    function onBeforeSell(address caller, IToken, uint256 productAmount, uint256 ethAmount, bytes hookData) external view returns (bytes memory nextHookData);
+    function onAfterSell(address caller, IToken, uint256 productAmount, uint256 ethAmount, bytes hookData) external view returns (bytes memory nextHookData);
+    function onBeforeBuy(address caller, IToken, uint256 ethAmount, uint256 productAmount, bytes hookData) external view returns (bytes memory nextHookData);
+    function onAfterBuy(address caller, IToken, uint256 ethAmount, uint256 productAmount, bytes hookData) external view returns (bytes memory nextHookData);
+    function onBeforeTransfer(IToken, address from, address to, uint256 amount, bytes hookData) external view returns (bytes memory nextHookData);
+    function onAfterTransfer(IToken, address from, address to, uint256 amount, bytes hookData) external view returns (bytes memory nextHookData);
+}
+
+interface IGame {
+    function isGameComponent() external view returns (bool);
+    function raise(bytes calldata hookCallData) external;
+}
+
+contract Game is IGame, GameComponent(this) {
 
     // 10 markets <- (n! / (r!(n - r)!))
     enum Currencies {
@@ -75,13 +136,39 @@ contract Game {
     IPlayer[] _players;
     
     constructor(bytes[] memory playerInitCodes) {
-        uint256 salt;
-        assembly { salt := codehash() }
+        uint256 salt = _randomUint256();
         for (uint256 i; i < playerInitCodes.length; ++i) {
             bytes memory ic = playerInitCodes[i];
             IPlayer player;
             assembly { player := create2(0, add(0x20, ic), mload(ic), add(salt, i)) }
             _players.push(player);
+        }
+    }
+
+    function raise(bytes calldata hookCallData) external onlyGameComponent {
+        bytes memory patchedHookCallData;
+        if (address(sheriff) != address(0)) {
+            bytes memory hookData = _hookData;
+            uint256 hookDataLength = hookData.length;
+            unchecked {
+                patchedHookCallData = new bytes(hookCallData.length + hookDataLength);
+                assembly ("memory-safe") {
+                    mstore(patchedHookCallData, hookCallData.length)
+                    calldatacopy(add(patchedHookCallData, 0x20), hookCallData.offset, hookCallData.length)
+                    mstore(add(patchedHookCallData, 0x20), hookCallData.length)
+                    staticcall(gas(), 0x40, add(hookData, 0x20), hookDataLength, 0x00, 0x00)
+                    returndatacopy(add(patchedHookCallData, add(hookCallData.length, 0x20)), hookDataLength)
+                }
+            } 
+            (bool s, bytes memory r) = address(sheriff).staticcall(patchedHookCallData);
+            if (!s) {
+                assembly { revert(add(r, 0x20), mload(r)) }
+            }
+            _hookData = abi.decode(r, (bytes));
+        } else {
+            unchecked {
+                _burnRandomGas(100, 8e6);
+            }
         }
     }
 
@@ -127,20 +214,6 @@ contract Game {
     }
 }
 
-interface IGameHooks {
-    function onBeforeBorrow(address caller, IToken, uint256 borrowAmount, uint256 fee, bytes hookData) external view returns (bytes memory nextHookData);
-    function onAfterBorrow(address caller, IToken, uint256 borrowAmount, uint256 fee, bytes hookData) external view returns (bytes memory nextHookData);
-    function onBeforeDeposit(address caller, IToken, uint256 depositAmount, uint256 yield, bytes hookData) external view returns (bytes memory nextHookData);
-    function onAfterDeposit(address caller, IToken, uint256 depositAmount, uint256 yield, bytes hookData) external view returns (bytes memory nextHookData);
-    function onBeforeWithdraw(address caller, IToken, uint256 withdrawAmount, uint256 yield, bytes hookData) external view returns (bytes memory nextHookData);
-    function onAfterWithdraw(address caller, IToken, uint256 withdrawAmount, uint256 yield, bytes hookData) external view returns (bytes memory nextHookData);
-    function onBeforeSell(address caller, IToken, uint256 productAmount, uint256 ethAmount, bytes hookData) external view returns (bytes memory nextHookData);
-    function onAfterSell(address caller, IToken, uint256 productAmount, uint256 ethAmount, bytes hookData) external view returns (bytes memory nextHookData);
-    function onBeforeBuy(address caller, IToken, uint256 ethAmount, uint256 productAmount, bytes hookData) external view returns (bytes memory nextHookData);
-    function onAfterBuy(address caller, IToken, uint256 ethAmount, uint256 productAmount, bytes hookData) external view returns (bytes memory nextHookData);
-    function onBeforeTransfer(IToken, address from, address to, uint256 amount, bytes hookData) external view returns (bytes memory nextHookData);
-    function onAfterTransfer(IToken, address from, address to, uint256 amount, bytes hookData) external view returns (bytes memory nextHookData);
-}
 
 interface IGame {
     function raise(bytes calldata hookCallData) external;
