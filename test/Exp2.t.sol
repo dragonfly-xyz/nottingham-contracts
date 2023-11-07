@@ -63,6 +63,18 @@ contract Builder {
     }
 }
 
+contract BuilderMarket {
+    uint256 public immutable builderReserve0;
+    uint256 public immutable builderK;
+    mapping (address builder => uint256 reserve1) public reserve1ByBuilder;
+
+    function getMinimumBuilderBid(address builder) external view returns (uint256);
+    function _buyBuilderSlot(address builder, uint256 price) internal {
+        // ...
+    }
+
+}
+
 contract Game {
     uint256 _gasUsedByAllPlayers;
     mapping (address => uint256) _gasUsedByPlayer;
@@ -80,7 +92,6 @@ contract Game {
         require(!isActing);
         _;
     }
-    
 
     function playRound() external onlyGameMaster {
         uint256 maxBid;
