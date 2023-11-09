@@ -10,7 +10,8 @@ uint256 constant MAX_ACTION_GAS = 32e6;
 enum IncludeStatus {
     Reverted,
     Aborted,
-    Included
+    Included,
+    HookReverted
 }
 
 enum Asset {
@@ -144,8 +145,6 @@ contract Player {
 }
 
 contract Builder {
-    // If this fails, all players get included?
-    //  Incentive for other players to make this fail?
     function build(address[] players)
         external
         returns (uint256 bid)
@@ -185,6 +184,14 @@ library LibSafeCast {
     }
 }
 
+library LibBytes {
+    function rawRevert(bytes memory data) external pure {
+        assembly ("memory-safe") {
+            revert(add(data, 0x20), mload(data))
+        }
+    }
+}
+
 function divUp(uint256 n, uint256 d) internal pure returns (uint256 q) {
     return (n + (d - 1)) / d;
 }
@@ -199,14 +206,14 @@ contract LinkedPools {
     struct PoolState {
         uint96 reserve0;
         uint96 reserve1;
-        uint96 lastReserve0Accumulator;
+        uint128 lastReserve0Accumulator;
     }
     
     address public immutable OPERATOR;
     uint32 public immutable NUM_POOLS;
     uint96 immutable INITIAL_RESERVE0;
     uint96 immutable INITIAL_RESERVE1;
-    uint96 _reserve0Accumulator;
+    uint128 _reserve0Accumulator;
     mapping (uint32 poolId => PoolState state) _poolById;
 
     modifier onlyOperator() {
@@ -245,11 +252,12 @@ contract LinkedPools {
             (state.reserve0, state.reserve1) =
                 (INITIAL_RESERVE0, INITIAL_RESERVE1);
         }
-        uint96 reserve0Accumulator = _reserve0Accumulator;
+        uint128 reserve0Accumulator = _reserve0Accumulator;
         if (reserve0Accumulator > state.lastReserve0Accumulator) {
             // Sell any accumulated bought amount0s to this pool.
             uint96 amount0 =
-                (reserve0Accumulator - state.lastReserve0Accumulator) / NUM_POOLS;
+                (reserve0Accumulator - state.lastReserve0Accumulator).toUint96()
+                / NUM_POOLS;
             uint256 k = uint256(state.reserve0) * uint256(state.reserve1);
             state.reserve0 += amount0;
             state.reserve1 = (k / state.reserve0).toUint96();
@@ -302,22 +310,57 @@ contract LinkedPools {
         _poolById[poolId] = PoolState({
             reserve0: reserve0,
             reserve1: reserve1,
-            lastReserve0Accumulator: _reserve0Accumulator += amount0_
+            lastReserve0Accumulator: sell0ToAll(amount0_)
         });
         return amount1_;
+    }
+
+    function sell0ToAll(uint256 amount0)
+        public
+        onlyOperator
+    {
+        _sell0ToAll(amount0.toUint96());
+    }
+    
+    function _sell0ToAll(uint96 amount0) private returns (uint128 reserve0Accumulator) {
+        return _reserve0Accumulator += amount0;
     }
 }
 
 contract Game {
-    uint256 _gasUsedByAllPlayers;
-    mapping (address => uint256) _gasUsedByPlayer;
+    using LibBytes for bytes;
+
+    struct ActResult {
+        uint32 lastActRound;
+        bool reverted;
+        uint64 gasUsed;
+    }
+
+    bytes32 constant SUCCESSFUL_BUILD_PREFIX = keccak256('BUILD_SUCCEEDED');
+    uint256 constant ONE_BLOCK_UNIT = 1e6;
+
+    LinkedPools immutable BLOCK_MARKET;
+    Market immutable MARKET;
+
+    mapping (address => ActResult) _lastActResultByPlayer;
+    uint64 _gasUsedByAllPlayersThisRound;
+    uint32 public currentRound; 
     address public currentActor;
-    uint256 public round; 
     address _currentBuilder;
     address[] _players;
 
+    modifier noCurrentBuilder() {
+        require(msg.sender == address(0));
+        _;
+    } 
+    
     modifier onlyCurrentBuilder() {
         require(msg.sender == _currentBuilder);
+        _;
+    }
+
+    modifier onlySelfOrCurrentBuilder() {
+        require(msg.sender == address(this) || msg.sender == _currentBuilder);
         _;
     }
 
@@ -332,15 +375,8 @@ contract Game {
         address[] memory players = _players;
         for (uint256 i = 0; i < players.length; ++i) {
             address player = players[i];
-            uint256 bid;
-            try this.__buildAndRevert(player) {
-                assert(false);
-            } catch (bytes memory err) {
-                if (err.length == 32) {
-                    bid = abi.decode(err, (uint256))
-                }
-            }
-            if (bid != 0 && bid > maxBid)  {
+            uint256 bid = _simulateBuild(player);
+            if (bid != 0 && bid > maxBid) {
                 maxBid = bid; 
                 bidWinner = player;
             }
@@ -348,56 +384,79 @@ contract Game {
         if (bidWinner != address(0)) {
             assert(_callBuild(bidWinner) == maxBid);
         } else (!blockBuilt) {
-            // No builder or builder failed. EVeryone gets in.
-            for (uint256 i = 0; i < players.length; ++i) {
-                players[i].include(players[i], "");
-            }
+            // No builder. Everyone gets in.
+            _buildDefaultBlock();
         }
-        ++round;
+        ++currentRound;
     }
 
-    function include(bytes memory data)
+    function _buildDefaultBlock(address[] memory players) private noCurrentBuilder {
+        for (uint256 i = 0; i < players.length; ++i) {
+            includePlayer(players[i], "");
+        }
+        // Could this could cause a pool's price to go to 0 given enough rounds?
+        // Could the price get stuck as insignificant even with positive bids?  
+        // Shouldn't occur with sane start conditions and reasonable # of rounds.
+        BLOCK_MARKET.sell0ToAll(ONE_BLOCK_UNIT);
+    }
+
+    function includeCurrentBuilder(bytes memory actData)
         external
         onlyCurrentBuilder
         notActing 
     {
-        this.__act(player, builder, true);
+        this.__act(msg.sender, builder, actData, true);
     }
 
-    function include(address player, bytes memory data)
+    function includePlayer(address player, bytes memory afterIncludeData)
         external
-        onlyCurrentBuilder
+        onlySelfOrCurrentBuilder
         notActing 
         returns (IncludeStatus status, bytes memory result)
     {
         try 
-            this.__include(msg.sender, player, data, false)
+            this.__includePlayer(msg.sender, player, afterIncludeData)
                 returns (bytes memory includeData) {
             return (IncludeStatus.Included, includeData);
         } catch (bytes memory errData) {
-            IncludeStatus status = abi.decode(errData, (IncludeStatus));
-            if (status == IncludeStatus.Reverted) {
-                return (status, "");
+            if (errData.length >= 32) {
+                IncludeStatus status = abi.decode(errData, (IncludeStatus));
+                if (status == IncludeStatus.Reverted) {
+                    return (status, "");
+                }
+                if (status == IncludeStatus.Aborted) {
+                    return abi.decode(errData, (IncludeStatus, bytes));
+                }
+                if (status == IncludeStatus.HookReverted) {
+                    (, bytes memory revertData) = abi.decode(errData, (IncludeStatus, bytes));
+                    revertData.rawRevert();
+                }
             }
-            if (status == IncludeStatus.Aborted) {
-                return abi.decode(errData, (IncludeStatus, bytes));
+        }
+        revert IncludeFailedError();
+    }
+
+    function _simulateBuild(address builder) private returns (uint256 bid) {
+        try this.__buildAndRevert(builder) {
+            assert(false);
+        } catch (bytes memory err) {
+            if (err.length == 64) {
+                bytes32 prefix;
+                (prefix, bid) = abi.decode(err, (bytes32, uint256));
+                if (prefix != SUCCESSFUL_BUILD_PREFIX) {
+                    bid = 0;
+                }
             }
         }
     }
 
     function __buildAndRevert(address builder) external onlySelf {
         uint256 bid = _callBuild()
-        if (bid == 0) {
-            revert("");
-        }
-        assembly ("memory-safe") {
-            mstore(0x00, bid)
-            revert(0x00, 0x00)
-        }
+        abi.encode(SUCCESSFUL_BUILD_PREFIX, bid).rawRevert();
     }
 
-    function _callBuild(address builder) private returns (uint256 bid) {
-        _currentBuilder = bidWinner;
+    function _callBuild(address builder) private noCurrentBuilder returns (uint256 bid) {
+        _currentBuilder = builder;
         {
             bytes memory callData = abi.encodeCall(build, (players));
             assembly ("memory-safe")  {
@@ -407,59 +466,68 @@ contract Game {
                 }
             }
         }
-        if (bid != 0) {
-            try MARKET.burn(Asset.Gold, builder, bid) {}
-            catch { bid = 0; }
-        }
+        // Must meet minimum block bid for this player.
+        require(bid >= BLOCK_MARKET.quote0(player, ONE_BLOCK_UNIT));
+        BLOCK_MARKET.buy0(builder, ONE_BLOCK_UNIT);
+        MARKET.burn(Asset.Gold, builder, bid);
+        _currentBuilder = address(0);
     }
 
-    function __include(address builder, address player, bytes memory data)
+    function __includePlayer(address builder, address player, bytes memory afterIncludeData)
         external
         onlySelf
         returns (bytes memory result)
     {
-        require(!included[round][player]);
-        included[round][player] = true;
         try {
-            this.__act(player, builder);
+            this.__act(player, builder, "", false);
         } catch {
             abi.encode(IncludeStatus.Reverted).rawRevert();
         }
-    
         if (builder != player && builder != address(this)) {
-            bytes memory abortResult = Builder(builder).afterInclude(player, data);
-            if (abortResult.length > 0) {
-                abi.encode(IncludeStatus.Aborted, data).rawRevert();
+            try Builder(builder).afterInclude(player, afterIncludeData)
+                returns (bytes memory abortResult)
+            {
+                if (abortResult.length > 0) {
+                    abi.encode(IncludeStatus.Aborted, abortResult).rawRevert();
+                }
+            } catch (bytes memory err) {
+                abi.encode(IncludeStatus.HookReverted, err).rawRevert();
             }
         }
-        
-        // What if gas consumed just counted against the player's final score?
-        // Like you get penalized based on what % of total combined gas was consumed by
-        // all parties? 
         emit Included(builder, player);
     }
 
-    function __act(address player, address builder, bool bubbleRevert)
+    function __act(address player, address builder, bytes memory actData, bool bubbleRevert)
         external
-        notActing
         onlySelf
     {
+        uint32 currentRound_ = currentRound;
+        ActResult memory result = _lastActResultByPlayer[player];
+        require(result.lastActRound != currentRound_);
+        result.lastActRound = currentRound_;
+        _lastActResultByPlayer[player] = result;
         currentActor = player;
-        bytes memory callData = abi.encodeCall(Player.act, (builder));
-        uint256 gasUsed = gasleft();
-        assembly ("memory-safe") {
-            let s := call(MAX_ACTION_GAS, player, 0, add(callData, 0x20), mload(callData), 0, 0)
-            if iszero(s) {
-                if iszero(bubbleRevert) {
-                    returndatacopy(0, 0, returndatasize())
-                    revert(0, returndatasize())
+        {
+            uint64 gasUsed;
+            bool succeeded;
+            bytes memory callData = abi.encodeCall(Player.act, (builder, actData));
+            assembly ("memory-safe") {
+                gasUsed := gas()
+                succeeded := call(MAX_ACTION_GAS, player, 0, add(callData, 0x20), mload(callData), 0, 0)
+                if iszero(succeeded) {
+                    if iszero(bubbleRevert) {
+                        returndatacopy(0x00, 0x00, returndatasize())
+                        revert(0x00, returndatasize())
+                    }
+                    revert(0x00, 0x00)
                 }
-                revert(0, 0)
+                gasUsed := sub(gasUsed, gas())
             }
-            gasUsed := sub(gasUsed, gas()) 
+            result.gasUsed = gasUsed;
+            result.reverted = !succeeded;
         }
-        _gasUsedByAllPlayers += gasUsed;
-        _gasUsedByPlayer[player] += gasUsed;
+        _lastActResultByPlayer[player] = result;
+        _gasUsedByAllPlayersThisRound += result.gasUsed;
         currentActor = address(0); 
     }
 }
