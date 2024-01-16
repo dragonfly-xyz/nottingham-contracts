@@ -40,7 +40,7 @@ contract GameTest is Test {
             creationCodes[i] = type(NoopPlayer).creationCode;
         }
         (Game game,) = _createGame(creationCodes);
-        assertEq(game.assetCount(), playerCount);
+        assertEq(game.ASSET_COUNT(), playerCount);
     }
 
     function testCannotDeployGameWithLessThanTwoPlayers() external {
@@ -157,7 +157,7 @@ contract GameTest is Test {
     function _getMaxAssetBalance(Game game, uint8 playerIdx)
         internal view returns (uint8 maxAssetIdx, uint256 maxAssetBal)
     {
-        uint8 assetCount = game.assetCount();
+        uint8 assetCount = game.ASSET_COUNT();
         for (uint8 i; i < assetCount; ++i) {
             uint256 bal = game.balanceOf(playerIdx, i);
             if (bal > maxAssetBal) {
@@ -171,7 +171,7 @@ contract GameTest is Test {
         internal view returns (uint8 maxAssetIdx, uint256 maxAssetBal)
     {
         maxAssetIdx = GOLD_IDX + 1;
-        uint8 assetCount = game.assetCount();
+        uint8 assetCount = game.ASSET_COUNT();
         for (uint8 i = GOLD_IDX + 1; i < assetCount; ++i) {
             uint256 bal = game.balanceOf(playerIdx, i);
             if (bal > maxAssetBal) {
@@ -202,7 +202,7 @@ contract DonatingPlayer is IPlayer {
 
     function turn(uint8) external {
         Game game = Game(msg.sender);
-        uint8 assetCount = game.assetCount();
+        uint8 assetCount = game.ASSET_COUNT();
         for (uint8 assetIdx = 1; assetIdx < assetCount; ++assetIdx) {
             // Always donate to last player.
             game.transfer(

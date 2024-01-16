@@ -22,6 +22,7 @@ contract Game {
     uint160 constant PLAYER_ADDRESS_INDEX_MASK = 7;
 
     address public immutable GM;
+    uint8 public immutable ASSET_COUNT;
 
     uint8 public playerCount;
     uint16 _round;
@@ -35,7 +36,7 @@ contract Game {
     error GameSetupError(string msg);
     error AccessError();
     error InsufficientBalanceError(uint8 playerIdx, uint8 assetIdx);
-    error InvalidPlayerError(uint8 playerIdx);
+    error InvalidPlayerError();
     error PlayerMissingFromBlockError(uint8 builderIdx);
     error PlayerBuildBlockFailedError(uint8 builderIdx, bytes revertData);
     error OnlySelfError();
@@ -53,6 +54,7 @@ contract Game {
     event PlayerBlockBuilt(uint16 round, uint8 indexed builderIdx);
     event DefaultBlockBuilt(uint16 round);
     event BuildPlayerBlockFailedWarning(bytes data);
+    event Swap(uint8 playerIdx, uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount, uint256 toAmount);
 
     modifier onlyGameMaster() {
         if (msg.sender != GM) revert AccessError();
@@ -98,10 +100,11 @@ contract Game {
         {
             // There will be nplayer assets (incl gold) in the market to ensure
             // at least one asset will be in contention.
-            uint256[] memory assetReserves = new uint256[](playerCount_);
+            ASSET_COUNT = uint8(playerCount_);
+            uint256[] memory assetReserves = new uint256[](ASSET_COUNT);
             // Initial price is 2:1 gold->good.
             assetReserves[GOLD_IDX] = 200 ether; // Gold is always at asset idx 0.
-            for (uint8 i = 1; i < playerCount_; ++i) {
+            for (uint8 i = 1; i < ASSET_COUNT; ++i) {
                 assetReserves[i] = 100 ether;
             }
             SLibAssetMarket.init(assetReserves);
@@ -141,7 +144,7 @@ contract Game {
     function transfer(uint8 toPlayerIdx, uint8 assetIdx, uint256 amount) public {
         if (!_inRound) revert AccessError();
         uint8 fromPlayerIdx = _getIndexFromPlayer(IPlayer(msg.sender));
-        if (assetIdx >= assetCount()) revert InvalidAssetError();
+        _assertValidAsset(assetIdx);
         // Sender and receiver must be players.
         if (address(_playerByIdx[fromPlayerIdx]) != msg.sender ||
             address(_playerByIdx[toPlayerIdx]) == address(0))
@@ -157,7 +160,7 @@ contract Game {
 
     function takeTurn(uint8 playerIdx) external onlyBuilder returns (bool success) {
         IPlayer player = _playerByIdx[playerIdx];
-        if (address(player) == address(0)) revert InvalidPlayerError(playerIdx);
+        if (address(player) == address(0)) revert InvalidPlayerError();
         {
             // Check and update the player inclusion bitmap.
             uint8 bitmap = _isPlayerIncludedInRoundBitmap;
@@ -170,7 +173,55 @@ contract Game {
         return _safeCallTurn(player, _getIndexFromPlayer(_builder));
     }
 
-    function buildPlayerBlockAndRevert__(IPlayer builder) external {
+    function sell(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount)
+        external returns (uint256 toAmount)
+    {
+        uint8 playerIdx = _getValidPlayerIdx(IPlayer(msg.sender));
+        _assertValidAsset(fromAssetIdx);
+        _assertValidAsset(toAssetIdx);
+        _burnAssetFrom(playerIdx, fromAssetIdx, fromAmount);
+        toAmount = SLibAssetMarket.sell(fromAssetIdx, toAssetIdx, fromAmount);
+        _mintAssetTo(playerIdx, toAssetIdx, toAmount);
+        emit Swap(playerIdx, fromAssetIdx, toAssetIdx, fromAmount, toAmount);
+    }
+
+    function buy(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 toAmount)
+        external returns (uint256 fromAmount)
+    {
+        uint8 playerIdx = _getValidPlayerIdx(IPlayer(msg.sender));
+        _assertValidAsset(fromAssetIdx);
+        _assertValidAsset(toAssetIdx);
+        fromAmount = SLibAssetMarket.buy(fromAssetIdx, toAssetIdx, toAmount);
+        _burnAssetFrom(playerIdx, fromAssetIdx, fromAmount);
+        _mintAssetTo(playerIdx, toAssetIdx, toAmount);
+        emit Swap(playerIdx, fromAssetIdx, toAssetIdx, fromAmount, toAmount);
+    }
+
+    function quoteSell(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount)
+        external view returns (uint256 toAmount)
+    {
+        _assertValidAsset(fromAssetIdx);
+        _assertValidAsset(toAssetIdx);
+        return SLibAssetMarket.quoteSell(fromAssetIdx, toAssetIdx, fromAmount);
+    }
+
+    function quoteBuy(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 toAmount)
+        external view returns (uint256 fromAmount)
+    {
+        _assertValidAsset(fromAssetIdx);
+        _assertValidAsset(toAssetIdx);
+        return SLibAssetMarket.quoteBuy(fromAssetIdx, toAssetIdx, toAmount);
+    }
+
+    function marketState() external view returns (uint256[] memory reserves, uint256 k) {
+        reserves = new uint256[](ASSET_COUNT);
+        for (uint8 assetIdx; assetIdx < ASSET_COUNT; ++assetIdx) {
+            reserves[assetIdx] = SLibAssetMarket.reserve(assetIdx);
+        }
+        return (reserves, SLibAssetMarket.k());
+    }
+
+    function buildPlayerBlockAndRevert(IPlayer builder) external {
         revert BuildPlayerBlockAndRevertSuccess(this.selfBuildPlayerBlock(builder));
     }
 
@@ -191,15 +242,11 @@ contract Game {
         return _round >= MAX_ROUNDS;
     }
 
-    function assetCount() public view returns (uint8 numAssets) {
-        return SLibAssetMarket.count();
-    }
-
     function _findWinner(uint8 playerCount_, uint16 round_)
         private view returns (IPlayer winner)
     {
         // Find which player has the maximum balance of any asset that isn't gold.
-        uint8 nAssets = assetCount();
+        uint8 nAssets = ASSET_COUNT;
         uint8 maxBalancePlayerIdx;
         uint8 maxBalanceAssetIdx;
         uint256 maxBalance;
@@ -249,7 +296,7 @@ contract Game {
         private returns (uint256 bid)
     {
         IPlayer builder = players[builderIdx];
-        try this.buildPlayerBlockAndRevert__(builder) {
+        try this.buildPlayerBlockAndRevert(builder) {
             // Call must revert.
             assert(false);
         } catch (bytes memory data) {
@@ -330,6 +377,11 @@ contract Game {
         }
     }
 
+    function _getValidPlayerIdx(IPlayer player) private view returns (uint8 playerIdx) {
+        playerIdx = _getIndexFromPlayer(player);
+        if (_playerByIdx[playerIdx] != player) revert InvalidPlayerError();
+    }
+
     function _getIndexFromPlayer(IPlayer player) private pure returns (uint8 playerIdx) {
         // The deployment process in the constructor ensures that the lowest 3 bits of the
         // player's address is also its player index.
@@ -337,7 +389,7 @@ contract Game {
     }
 
     function _distributeIncome(IPlayer[] memory players) private {
-        uint8 numAssets = assetCount();
+        uint8 numAssets = ASSET_COUNT;
         // Mint 1 unit of each type of asset to each player.
         for (uint8 playerIdx; playerIdx < players.length; ++playerIdx) {
             for (uint8 assetIdx; assetIdx < numAssets; ++assetIdx) {
@@ -356,5 +408,9 @@ contract Game {
         if (bal < assetIdx) revert InsufficientBalanceError(playerIdx, assetIdx);
         balanceOf[playerIdx][assetIdx] = bal - assetAmount;
         emit Burn(playerIdx, assetIdx, assetAmount);
+    }
+
+    function _assertValidAsset(uint8 assetIdx) private view {
+        if (assetIdx >= ASSET_COUNT) revert InvalidAssetError();
     }
 }

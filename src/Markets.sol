@@ -64,6 +64,7 @@ library SLibAssetMarket {
     function buy(uint8 fromIdx, uint8 toIdx, uint256 toAmt)
         internal returns (uint256 fromAmt)
     {
+        if (fromIdx == toIdx) return toAmt;
         UD60x18[] memory reserves = _getStorage().reserves;
         UD60x18 toAmt_ = fromWei(toAmt);
         UD60x18 fromAmt_ = _quoteBuy(reserves[fromIdx], reserves[toIdx], toAmt_);
@@ -77,6 +78,7 @@ library SLibAssetMarket {
     function sell(uint8 fromIdx, uint8 toIdx, uint256 fromAmt)
         internal returns (uint256 toAmt)
     {
+        if (fromIdx == toIdx) return fromAmt;
         UD60x18[] memory reserves = _getStorage().reserves;
         UD60x18 fromAmt_ = fromWei(fromAmt);
         UD60x18 toAmt_ = _quoteSell(reserves[fromIdx], reserves[toIdx], fromAmt_);
@@ -109,6 +111,7 @@ library SLibAssetMarket {
     function quoteBuy(uint8 fromIdx, uint8 toIdx, uint256 toAmt)
         internal view returns (uint256 fromAmt)
     {
+        if (fromIdx == toIdx) return toAmt;
         UD60x18[] memory reserves = _getStorage().reserves;
         UD60x18 toAmt_ = fromWei(toAmt);
         // If not enough liquidity, return inf.
@@ -120,6 +123,7 @@ library SLibAssetMarket {
     function quoteSell(uint8 fromIdx, uint8 toIdx, uint256 fromAmt)
         internal view returns (uint256 toAmt)
     {
+        if (fromIdx == toIdx) return fromAmt;
         UD60x18[] memory reserves = _getStorage().reserves;
         UD60x18 fromAmt_ = fromWei(fromAmt);
         UD60x18 toAmt_ = _quoteSell(reserves[fromIdx], reserves[toIdx], fromAmt_);
