@@ -33,7 +33,15 @@ contract GameTest is Test {
         assertEq(address(game), gameAddress); 
     }
 
-    // testCreatesNAssets()
+    function testCreatesNAssets() external {
+        uint256 playerCount = T.randomUint256() % 5 + 2;
+        bytes[] memory creationCodes = new bytes[](playerCount);
+        for (uint256 i; i < playerCount; ++i) {
+            creationCodes[i] = type(NoopPlayer).creationCode;
+        }
+        (Game game,) = _createGame(creationCodes);
+        assertEq(game.assetCount(), playerCount);
+    }
 
     function testCannotDeployGameWithLessThanTwoPlayers() external {
         bytes[] memory creationCodes = new bytes[](1);
