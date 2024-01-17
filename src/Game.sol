@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8;
 
-import { SLibAssetMarket } from './Markets.sol';
+import { AssetMarket } from './Markets.sol';
 import { LibBytes } from './LibBytes.sol';
 import { LibAddress } from './LibAddress.sol';
 import { IPlayer } from './IPlayer.sol';
 
-contract Game {
+contract Game is AssetMarket {
     using LibBytes for bytes;
     using LibAddress for address;
 
@@ -22,7 +22,6 @@ contract Game {
     uint160 constant PLAYER_ADDRESS_INDEX_MASK = 7;
 
     address public immutable GM;
-    uint8 public immutable ASSET_COUNT;
 
     uint8 public playerCount;
     uint16 _round;
@@ -71,7 +70,9 @@ contract Game {
         _;
     }
 
-    constructor(bytes[] memory playerCreationCodes, uint256[] memory deploySalts) {
+    constructor(bytes[] memory playerCreationCodes, uint256[] memory deploySalts)
+        AssetMarket(uint8(playerCreationCodes.length))
+    {
         if (playerCreationCodes.length != deploySalts.length) {
             revert GameSetupError('mismatched arrays');
         }
@@ -100,14 +101,14 @@ contract Game {
         {
             // There will be nplayer assets (incl gold) in the market to ensure
             // at least one asset will be in contention.
-            ASSET_COUNT = uint8(playerCount_);
-            uint256[] memory assetReserves = new uint256[](ASSET_COUNT);
+            uint8 assetCount_ = uint8(ASSET_COUNT);
+            uint256[] memory assetReserves = new uint256[](assetCount_);
             // Initial price is 2:1 gold->good.
             assetReserves[GOLD_IDX] = 200 ether; // Gold is always at asset idx 0.
-            for (uint8 i = 1; i < ASSET_COUNT; ++i) {
+            for (uint8 i = 1; i < assetCount_; ++i) {
                 assetReserves[i] = 100 ether;
             }
-            SLibAssetMarket.init(assetReserves);
+            AssetMarket._init(assetReserves);
         }
     }
 
@@ -180,7 +181,7 @@ contract Game {
         _assertValidAsset(fromAssetIdx);
         _assertValidAsset(toAssetIdx);
         _burnAssetFrom(playerIdx, fromAssetIdx, fromAmount);
-        toAmount = SLibAssetMarket.sell(fromAssetIdx, toAssetIdx, fromAmount);
+        toAmount = AssetMarket._sell(fromAssetIdx, toAssetIdx, fromAmount);
         _mintAssetTo(playerIdx, toAssetIdx, toAmount);
         emit Swap(playerIdx, fromAssetIdx, toAssetIdx, fromAmount, toAmount);
     }
@@ -191,7 +192,7 @@ contract Game {
         uint8 playerIdx = _getValidPlayerIdx(IPlayer(msg.sender));
         _assertValidAsset(fromAssetIdx);
         _assertValidAsset(toAssetIdx);
-        fromAmount = SLibAssetMarket.buy(fromAssetIdx, toAssetIdx, toAmount);
+        fromAmount = AssetMarket._buy(fromAssetIdx, toAssetIdx, toAmount);
         _burnAssetFrom(playerIdx, fromAssetIdx, fromAmount);
         _mintAssetTo(playerIdx, toAssetIdx, toAmount);
         emit Swap(playerIdx, fromAssetIdx, toAssetIdx, fromAmount, toAmount);
@@ -202,7 +203,7 @@ contract Game {
     {
         _assertValidAsset(fromAssetIdx);
         _assertValidAsset(toAssetIdx);
-        return SLibAssetMarket.quoteSell(fromAssetIdx, toAssetIdx, fromAmount);
+        return AssetMarket._quoteSell(fromAssetIdx, toAssetIdx, fromAmount);
     }
 
     function quoteBuy(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 toAmount)
@@ -210,15 +211,15 @@ contract Game {
     {
         _assertValidAsset(fromAssetIdx);
         _assertValidAsset(toAssetIdx);
-        return SLibAssetMarket.quoteBuy(fromAssetIdx, toAssetIdx, toAmount);
+        return AssetMarket._quoteBuy(fromAssetIdx, toAssetIdx, toAmount);
     }
 
     function marketState() external view returns (uint256[] memory reserves, uint256 k) {
         reserves = new uint256[](ASSET_COUNT);
         for (uint8 assetIdx; assetIdx < ASSET_COUNT; ++assetIdx) {
-            reserves[assetIdx] = SLibAssetMarket.reserve(assetIdx);
+            reserves[assetIdx] = AssetMarket._getReserve(assetIdx);
         }
-        return (reserves, SLibAssetMarket.k());
+        return (reserves, AssetMarket._k());
     }
 
     function buildPlayerBlockAndRevert(IPlayer builder) external {

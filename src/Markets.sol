@@ -4,6 +4,7 @@ import { UD60x18, ZERO, UNIT, convert } from 'prb-math/UD60x18.sol';
 
 error MinLiquidityError();
 error InsufficientLiquidityError();
+error InvalidAssetError();
 
 function fromWei(uint256 weiAmount) pure returns (UD60x18 tokens) {
     // All tokens are 18 decimals so it's identical bit representation to UD60x18.
@@ -42,95 +43,95 @@ function nthRoot(UD60x18 x, uint256 n) pure returns (UD60x18 r) {
 }
 
 // A multidimensional virtual AMM for 18-decimal asset tokens.
-library SLibAssetMarket {
-    struct Storage {
-        UD60x18[] reserves;
-    }
+abstract contract AssetMarket {
+    uint8 public immutable ASSET_COUNT;
+    mapping (uint8 => UD60x18) private _reserves;
 
-    bytes32 private constant STORAGE_SLOT = keccak256('SLibAssetMarket::Storage');
     UD60x18 private constant MIN_LIQUIDITY_PR = UNIT;
 
-    function init(uint256[] memory initialReserveAmounts) internal {
-        assert(initialReserveAmounts.length != 0);
-        uint256 n = initialReserveAmounts.length;
-        UD60x18[] memory reserves = new UD60x18[](n);
-        for (uint8 i; i < n; ++i) {
-            reserves[i] = fromWei(initialReserveAmounts[i]);
-        }
-        if (calcK(reserves) < MIN_LIQUIDITY_PR.pow(convert(n))) revert MinLiquidityError();
-        _getStorage().reserves = reserves;
+    constructor(uint8 assetCount) {
+        ASSET_COUNT = uint8(assetCount);
     }
 
-    function buy(uint8 fromIdx, uint8 toIdx, uint256 toAmt)
+    function _init(uint256[] memory initialReserveAmounts) internal {
+        assert(initialReserveAmounts.length == ASSET_COUNT);
+        uint256 n = initialReserveAmounts.length;
+        UD60x18[] memory reserves;
+        // UD60x18 and 18-decimal tokens have identical bit representations so this is OK.
+        assembly ("memory-safe") { reserves := initialReserveAmounts }
+        if (calcK(reserves) < MIN_LIQUIDITY_PR.pow(convert(n))) revert MinLiquidityError();
+        _storeReserves(reserves);
+    }
+
+    function _buy(uint8 fromIdx, uint8 toIdx, uint256 toAmt)
         internal returns (uint256 fromAmt)
     {
+        if (fromIdx >= ASSET_COUNT || toIdx >= ASSET_COUNT) revert InvalidAssetError();
         if (fromIdx == toIdx) return toAmt;
-        UD60x18[] memory reserves = _getStorage().reserves;
+        UD60x18[] memory reserves = _loadReserves();
         UD60x18 toAmt_ = fromWei(toAmt);
-        UD60x18 fromAmt_ = _quoteBuy(reserves[fromIdx], reserves[toIdx], toAmt_);
+        UD60x18 fromAmt_ = _quoteBuyFromReserves(reserves[fromIdx], reserves[toIdx], toAmt_);
         reserves[fromIdx] = reserves[fromIdx] + fromAmt_;
         reserves[toIdx] = reserves[toIdx] - toAmt_;
-        _getStorage().reserves[fromIdx] = reserves[fromIdx];
-        _getStorage().reserves[toIdx] = reserves[toIdx];
+        _reserves[fromIdx] = reserves[fromIdx];
+        _reserves[toIdx] = reserves[toIdx];
         return toWei(fromAmt_);
     }
 
-    function sell(uint8 fromIdx, uint8 toIdx, uint256 fromAmt)
+    function _sell(uint8 fromIdx, uint8 toIdx, uint256 fromAmt)
         internal returns (uint256 toAmt)
     {
+        if (fromIdx >= ASSET_COUNT || toIdx >= ASSET_COUNT) revert InvalidAssetError();
         if (fromIdx == toIdx) return fromAmt;
-        UD60x18[] memory reserves = _getStorage().reserves;
+        UD60x18[] memory reserves = _loadReserves();
         UD60x18 fromAmt_ = fromWei(fromAmt);
-        UD60x18 toAmt_ = _quoteSell(reserves[fromIdx], reserves[toIdx], fromAmt_);
+        UD60x18 toAmt_ = _quoteSellFromReserves(reserves[fromIdx], reserves[toIdx], fromAmt_);
         reserves[fromIdx] = reserves[fromIdx] + fromAmt_;
         reserves[toIdx] = reserves[toIdx] - toAmt_;
-        _getStorage().reserves[fromIdx] = reserves[fromIdx];
-        _getStorage().reserves[toIdx] = reserves[toIdx];
+        _reserves[fromIdx] = reserves[fromIdx];
+        _reserves[toIdx] = reserves[toIdx];
         return toWei(toAmt_);
     }
 
-    function count() internal view returns (uint8 count_) {
-        return uint8(_getStorage().reserves.length);
+    function _getReserve(uint8 idx) internal view returns (uint256 weiReserve) {
+        return toWei(_reserves[idx]);
     }
 
-    function reserve(uint8 idx) internal view returns (uint256 weiReserve) {
-        UD60x18[] memory reserves = _getStorage().reserves;
-        weiReserve = toWei(reserves[idx]);
-    }
-
-    function k() internal view returns (uint256) {
+    function _k() internal view returns (uint256) {
         // Externally, k should be treated as a unitless invariant.
-        return toWei(calcK(_getStorage().reserves));
+        return toWei(calcK(_loadReserves()));
     }
 
-    function rate(uint8 fromIdx, uint8 toIdx) internal view returns (uint256 toRate) {
-        UD60x18[] storage reserves = _getStorage().reserves;
-        return toWei(reserves[toIdx] / reserves[fromIdx]);
+    function _getRate(uint8 fromIdx, uint8 toIdx) internal view returns (uint256 toRate) {
+        if (fromIdx == toIdx) return 1e18;
+        return toWei(_reserves[toIdx] / _reserves[fromIdx]);
     }
 
-    function quoteBuy(uint8 fromIdx, uint8 toIdx, uint256 toAmt)
+    function _quoteBuy(uint8 fromIdx, uint8 toIdx, uint256 toAmt)
         internal view returns (uint256 fromAmt)
     {
+        if (fromIdx >= ASSET_COUNT || toIdx >= ASSET_COUNT) revert InvalidAssetError();
         if (fromIdx == toIdx) return toAmt;
-        UD60x18[] memory reserves = _getStorage().reserves;
+        UD60x18[] memory reserves = _loadReserves();
         UD60x18 toAmt_ = fromWei(toAmt);
         // If not enough liquidity, return inf.
         if (toAmt_ >= reserves[fromIdx]) return type(uint256).max;
-        UD60x18 fromAmt_ = _quoteBuy(reserves[fromIdx], reserves[toIdx], toAmt_);
+        UD60x18 fromAmt_ = _quoteBuyFromReserves(reserves[fromIdx], reserves[toIdx], toAmt_);
         return toWei(fromAmt_);
     }
 
-    function quoteSell(uint8 fromIdx, uint8 toIdx, uint256 fromAmt)
+    function _quoteSell(uint8 fromIdx, uint8 toIdx, uint256 fromAmt)
         internal view returns (uint256 toAmt)
     {
+        if (fromIdx >= ASSET_COUNT || toIdx >= ASSET_COUNT) revert InvalidAssetError();
         if (fromIdx == toIdx) return fromAmt;
-        UD60x18[] memory reserves = _getStorage().reserves;
+        UD60x18[] memory reserves = _loadReserves();
         UD60x18 fromAmt_ = fromWei(fromAmt);
-        UD60x18 toAmt_ = _quoteSell(reserves[fromIdx], reserves[toIdx], fromAmt_);
+        UD60x18 toAmt_ = _quoteSellFromReserves(reserves[fromIdx], reserves[toIdx], fromAmt_);
         return toWei(toAmt_);
     }
 
-    function _quoteBuy(UD60x18 fromReserve, UD60x18 toReserve, UD60x18 toAmt)
+    function _quoteBuyFromReserves(UD60x18 fromReserve, UD60x18 toReserve, UD60x18 toAmt)
         private pure returns (UD60x18 fromAmt)
     {
         if (toAmt == ZERO) return ZERO;
@@ -138,16 +139,24 @@ library SLibAssetMarket {
         return (toAmt * fromReserve) / (toReserve - toAmt);
     }
 
-    function _quoteSell(UD60x18 fromReserve, UD60x18 toReserve, UD60x18 fromAmt)
+    function _quoteSellFromReserves(UD60x18 fromReserve, UD60x18 toReserve, UD60x18 fromAmt)
         private pure returns (UD60x18 toAmt)
     {
         if (fromAmt == ZERO) return ZERO;
         return (fromAmt * toReserve) / (fromReserve - fromAmt);
     }
 
-    function _getStorage() private pure returns (Storage storage stor) {
-        uint256 slot = uint256(STORAGE_SLOT);
-        assembly ("memory-safe") { stor.slot := slot }
+    function _storeReserves(UD60x18[] memory reserves) internal {
+        for (uint8 i; i < reserves.length; ++i) {
+            _reserves[i] = reserves[i];
+        }
+    }
+
+    function _loadReserves() internal view returns (UD60x18[] memory reserves) {
+        reserves = new UD60x18[](ASSET_COUNT);
+        for (uint8 i; i < ASSET_COUNT; ++i) {
+            reserves[i] = _reserves[i];
+        }
     }
 }
 
