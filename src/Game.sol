@@ -14,6 +14,8 @@ contract Game is AssetMarket {
     uint256 public constant MAX_PLAYERS = 8;
     uint8 public constant MAX_ROUNDS = 101;
     uint256 public constant MIN_WINNING_ASSET_BALANCE = 100e18;
+    uint256 internal constant MARKET_STARTING_GOLD = 200e18;
+    uint256 internal constant MARKET_STARTING_GOODS = 100e18;
     uint8 constant GOLD_IDX = 0;
     uint8 constant INVALID_PLAYER_IDX = type(uint8).max;
     uint256 constant MAX_TURN_GAS = 32e3;
@@ -41,7 +43,6 @@ contract Game is AssetMarket {
     error OnlySelfError();
     error PlayerAlreadyIncludedError(uint8 playerIdx);
     error BuildPlayerBlockAndRevertSuccess(uint256 bid);
-    error InvalidAssetError();
     
     event RoundPlayed(uint16 round);
     event PlayerTurnFailedWarning(uint8 playerIdx, bytes revertData);
@@ -104,9 +105,9 @@ contract Game is AssetMarket {
             uint8 assetCount_ = uint8(ASSET_COUNT);
             uint256[] memory assetReserves = new uint256[](assetCount_);
             // Initial price is 2:1 gold->good.
-            assetReserves[GOLD_IDX] = 200 ether; // Gold is always at asset idx 0.
+            assetReserves[GOLD_IDX] = MARKET_STARTING_GOLD; // Gold is always at asset idx 0.
             for (uint8 i = 1; i < assetCount_; ++i) {
-                assetReserves[i] = 100 ether;
+                assetReserves[i] = MARKET_STARTING_GOODS;
             }
             AssetMarket._init(assetReserves);
         }

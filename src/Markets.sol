@@ -1,10 +1,10 @@
 pragma solidity ^0.8;
 
-import { UD60x18, ZERO, UNIT, convert } from 'prb-math/UD60x18.sol';
+import { UD60x18, ZERO, UNIT, convert, sqrt } from 'prb-math/UD60x18.sol';
 
-error MinLiquidityError();
-error InsufficientLiquidityError();
-error InvalidAssetError();
+UD60x18 constant MIN_LIQUIDITY_PER_RESERVE = UD60x18.wrap(1e4);
+UD60x18 constant MAX_LIQUIDITY_PER_RESERVE = UD60x18.wrap(1e32);
+UD60x18 constant MIN_SQRT_K = UD60x18.wrap(1e2);
 
 function fromWei(uint256 weiAmount) pure returns (UD60x18 tokens) {
     // All tokens are 18 decimals so it's identical bit representation to UD60x18.
@@ -16,25 +16,36 @@ function toWei(UD60x18 tokens) pure returns (uint256 w) {
     return UD60x18.unwrap(tokens);
 }
 
-// Computes the product of all the reserves.
-function calcK(UD60x18[] memory reserves) pure returns (UD60x18 k_) {
-    k_ = reserves[0];
-    for (uint256 i = 1; i < reserves.length; ++i) {
-        k_ = k_ * reserves[i];
-    }
-}
+event K(uint256 x, uint256 y);
 
-// Computes the product of all the reserves except for the one at index `omitIdx`.
-function calcKWithout(UD60x18[] memory reserves, uint8 omitIdx)
-    pure returns (UD60x18 k_)
-{
-    k_ = UNIT;
-    for (uint256 i = 0; i < reserves.length; ++i) {
-        if (i != omitIdx) {
+// Computes the sqrt product of all the reserves.
+function calcSqrtK(UD60x18[] memory reserves) pure returns (UD60x18 k_) {
+    k_ = reserves[0];
+    bool rooted;
+    for (uint256 i = 1; i < reserves.length; ++i) {
+        if (rooted) {
+            k_ = k_ * sqrt(reserves[i]);
+        } else if (UD60x18.unwrap(reserves[i]) > 1e32) {
+            rooted = true;
+            k_ = sqrt(k_) * sqrt(reserves[i]);
+        } else {
             k_ = k_ * reserves[i];
         }
     }
+    return rooted ? k_ : sqrt(k_);
 }
+
+// Computes the product of all the reserves except for the one at index `omitIdx`.
+// function calcKWithout(UD60x18[] memory reserves, uint8 omitIdx)
+//     pure returns (UD60x18 k_)
+// {
+//     k_ = UNIT;
+//     for (uint256 i = 0; i < reserves.length; ++i) {
+//         if (i != omitIdx) {
+//             k_ = k_ * reserves[i];
+//         }
+//     }
+// }
 
 function nthRoot(UD60x18 x, uint256 n) pure returns (UD60x18 r) {
     if (n == 0) return UNIT;
@@ -44,22 +55,35 @@ function nthRoot(UD60x18 x, uint256 n) pure returns (UD60x18 r) {
 
 // A multidimensional virtual AMM for 18-decimal asset tokens.
 abstract contract AssetMarket {
+
+    error MinLiquidityError();
+    error MaxLiquidityError();
+    error InsufficientLiquidityError();
+    error InvalidAssetError();
+    error MinKError();
+    error PrecisionError();
+
     uint8 public immutable ASSET_COUNT;
     mapping (uint8 => UD60x18) private _reserves;
 
-    UD60x18 private constant MIN_LIQUIDITY_PR = UNIT;
-
     constructor(uint8 assetCount) {
+        assert(assetCount <= type(uint8).max);
         ASSET_COUNT = uint8(assetCount);
     }
 
     function _init(uint256[] memory initialReserveAmounts) internal {
         assert(initialReserveAmounts.length == ASSET_COUNT);
-        uint256 n = initialReserveAmounts.length;
         UD60x18[] memory reserves;
         // UD60x18 and 18-decimal tokens have identical bit representations so this is OK.
         assembly ("memory-safe") { reserves := initialReserveAmounts }
-        if (calcK(reserves) < MIN_LIQUIDITY_PR.pow(convert(n))) revert MinLiquidityError();
+        for (uint256 i; i < reserves.length; ++i) {
+            if (reserves[i] < MIN_LIQUIDITY_PER_RESERVE) revert MinLiquidityError();
+            if (reserves[i] > MAX_LIQUIDITY_PER_RESERVE) revert MaxLiquidityError();
+        }
+        {
+            UD60x18 k = calcSqrtK(reserves);
+            if (k < MIN_SQRT_K) revert MinKError();
+        }
         _storeReserves(reserves);
     }
 
@@ -99,7 +123,7 @@ abstract contract AssetMarket {
 
     function _k() internal view returns (uint256) {
         // Externally, k should be treated as a unitless invariant.
-        return toWei(calcK(_loadReserves()));
+        return toWei(calcSqrtK(_loadReserves()));
     }
 
     function _getRate(uint8 fromIdx, uint8 toIdx) internal view returns (uint256 toRate) {
@@ -114,8 +138,6 @@ abstract contract AssetMarket {
         if (fromIdx == toIdx) return toAmt;
         UD60x18[] memory reserves = _loadReserves();
         UD60x18 toAmt_ = fromWei(toAmt);
-        // If not enough liquidity, return inf.
-        if (toAmt_ >= reserves[fromIdx]) return type(uint256).max;
         UD60x18 fromAmt_ = _quoteBuyFromReserves(reserves[fromIdx], reserves[toIdx], toAmt_);
         return toWei(fromAmt_);
     }
@@ -136,14 +158,19 @@ abstract contract AssetMarket {
     {
         if (toAmt == ZERO) return ZERO;
         if (toAmt >= toReserve) revert InsufficientLiquidityError();
-        return (toAmt * fromReserve) / (toReserve - toAmt);
+        if (toReserve - toAmt < MIN_LIQUIDITY_PER_RESERVE) revert MinLiquidityError();
+        fromAmt = (toAmt * fromReserve) / (toReserve - toAmt);
+        if (fromReserve + fromAmt > MAX_LIQUIDITY_PER_RESERVE) revert MaxLiquidityError();
+        if (fromAmt == ZERO || fromAmt < toAmt * fromReserve / toReserve) revert PrecisionError();
     }
 
     function _quoteSellFromReserves(UD60x18 fromReserve, UD60x18 toReserve, UD60x18 fromAmt)
         private pure returns (UD60x18 toAmt)
     {
         if (fromAmt == ZERO) return ZERO;
-        return (fromAmt * toReserve) / (fromReserve - fromAmt);
+        if (fromReserve + fromAmt > MAX_LIQUIDITY_PER_RESERVE) revert MaxLiquidityError();
+        toAmt = (fromAmt * toReserve) / (fromReserve + fromAmt);
+        if (toReserve - toAmt < MIN_LIQUIDITY_PER_RESERVE) revert MinLiquidityError();
     }
 
     function _storeReserves(UD60x18[] memory reserves) internal {
