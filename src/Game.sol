@@ -215,12 +215,12 @@ contract Game is AssetMarket {
         return AssetMarket._quoteBuy(fromAssetIdx, toAssetIdx, toAmount);
     }
 
-    function marketState() external view returns (uint256[] memory reserves, uint256 k) {
+    function marketState() external view returns (uint256[] memory reserves) {
         reserves = new uint256[](ASSET_COUNT);
         for (uint8 assetIdx; assetIdx < ASSET_COUNT; ++assetIdx) {
             reserves[assetIdx] = AssetMarket._getReserve(assetIdx);
         }
-        return (reserves, AssetMarket._k());
+        return reserves;
     }
 
     function buildPlayerBlockAndRevert(IPlayer builder) external {

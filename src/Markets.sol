@@ -1,7 +1,5 @@
 pragma solidity ^0.8;
 
-import { UD60x18, ZERO, UNIT, convert, sqrt } from 'prb-math/UD60x18.sol';
-
 uint256 constant MIN_LIQUIDITY_PER_RESERVE = 1e4;
 uint256 constant MAX_LIQUIDITY_PER_RESERVE = 1e32;
 
@@ -58,13 +56,11 @@ abstract contract AssetMarket {
         if (fromIdx >= ASSET_COUNT || toIdx >= ASSET_COUNT) revert InvalidAssetError();
         if (fromIdx == toIdx) return toAmt;
         uint256[] memory reserves = _loadReserves();
-        uint256 toAmt_ = fromWei(toAmt);
-        uint256 fromAmt_ = _quoteBuyFromReserves(reserves[fromIdx], reserves[toIdx], toAmt_);
-        reserves[fromIdx] = reserves[fromIdx] + fromAmt_;
-        reserves[toIdx] = reserves[toIdx] - toAmt_;
+        fromAmt = _quoteBuyFromReserves(reserves[fromIdx], reserves[toIdx], toAmt);
+        reserves[fromIdx] = reserves[fromIdx] + fromAmt;
+        reserves[toIdx] = reserves[toIdx] - toAmt;
         _reserves[fromIdx] = reserves[fromIdx];
         _reserves[toIdx] = reserves[toIdx];
-        return toWei(fromAmt_);
     }
 
     function _sell(uint8 fromIdx, uint8 toIdx, uint256 fromAmt)
@@ -73,27 +69,20 @@ abstract contract AssetMarket {
         if (fromIdx >= ASSET_COUNT || toIdx >= ASSET_COUNT) revert InvalidAssetError();
         if (fromIdx == toIdx) return fromAmt;
         uint256[] memory reserves = _loadReserves();
-        uint256 fromAmt_ = fromWei(fromAmt);
-        uint256 toAmt_ = _quoteSellFromReserves(reserves[fromIdx], reserves[toIdx], fromAmt_);
-        reserves[fromIdx] = reserves[fromIdx] + fromAmt_;
-        reserves[toIdx] = reserves[toIdx] - toAmt_;
+        toAmt = _quoteSellFromReserves(reserves[fromIdx], reserves[toIdx], fromAmt);
+        reserves[fromIdx] = reserves[fromIdx] + fromAmt;
+        reserves[toIdx] = reserves[toIdx] - toAmt;
         _reserves[fromIdx] = reserves[fromIdx];
         _reserves[toIdx] = reserves[toIdx];
-        return toWei(toAmt_);
     }
 
     function _getReserve(uint8 idx) internal view returns (uint256 weiReserve) {
-        return toWei(_reserves[idx]);
-    }
-
-    function _k() internal view returns (uint256) {
-        // Externally, k should be treated as a unitless invariant.
-        return toWei(calcSqrtK(_loadReserves()));
+        return _reserves[idx];
     }
 
     function _getRate(uint8 fromIdx, uint8 toIdx) internal view returns (uint256 toRate) {
         if (fromIdx == toIdx) return 1e18;
-        return toWei(_reserves[toIdx] / _reserves[fromIdx]);
+        return _reserves[toIdx] / _reserves[fromIdx];
     }
 
     function _quoteBuy(uint8 fromIdx, uint8 toIdx, uint256 toAmt)
@@ -102,9 +91,7 @@ abstract contract AssetMarket {
         if (fromIdx >= ASSET_COUNT || toIdx >= ASSET_COUNT) revert InvalidAssetError();
         if (fromIdx == toIdx) return toAmt;
         uint256[] memory reserves = _loadReserves();
-        uint256 toAmt_ = fromWei(toAmt);
-        uint256 fromAmt_ = _quoteBuyFromReserves(reserves[fromIdx], reserves[toIdx], toAmt_);
-        return toWei(fromAmt_);
+        fromAmt = _quoteBuyFromReserves(reserves[fromIdx], reserves[toIdx], toAmt);
     }
 
     function _quoteSell(uint8 fromIdx, uint8 toIdx, uint256 fromAmt)
@@ -113,26 +100,24 @@ abstract contract AssetMarket {
         if (fromIdx >= ASSET_COUNT || toIdx >= ASSET_COUNT) revert InvalidAssetError();
         if (fromIdx == toIdx) return fromAmt;
         uint256[] memory reserves = _loadReserves();
-        uint256 fromAmt_ = fromWei(fromAmt);
-        uint256 toAmt_ = _quoteSellFromReserves(reserves[fromIdx], reserves[toIdx], fromAmt_);
-        return toWei(toAmt_);
+        toAmt = _quoteSellFromReserves(reserves[fromIdx], reserves[toIdx], fromAmt);
     }
 
     function _quoteBuyFromReserves(uint256 fromReserve, uint256 toReserve, uint256 toAmt)
         private pure returns (uint256 fromAmt)
     {
-        if (toAmt == ZERO) return ZERO;
+        if (toAmt == 0) return 0;
         if (toAmt >= toReserve) revert InsufficientLiquidityError();
         if (toReserve - toAmt < MIN_LIQUIDITY_PER_RESERVE) revert MinLiquidityError();
         fromAmt = (toAmt * fromReserve) / (toReserve - toAmt);
         if (fromReserve + fromAmt > MAX_LIQUIDITY_PER_RESERVE) revert MaxLiquidityError();
-        if (fromAmt == ZERO || fromAmt < toAmt * fromReserve / toReserve) revert PrecisionError();
+        if (fromAmt == 0 || fromAmt < toAmt * fromReserve / toReserve) revert PrecisionError();
     }
 
     function _quoteSellFromReserves(uint256 fromReserve, uint256 toReserve, uint256 fromAmt)
         private pure returns (uint256 toAmt)
     {
-        if (fromAmt == ZERO) return ZERO;
+        if (fromAmt == 0) return 0;
         if (fromReserve + fromAmt > MAX_LIQUIDITY_PER_RESERVE) revert MaxLiquidityError();
         toAmt = (fromAmt * toReserve) / (fromReserve + fromAmt);
         if (toReserve - toAmt < MIN_LIQUIDITY_PER_RESERVE) revert MinLiquidityError();
