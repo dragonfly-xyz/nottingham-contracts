@@ -3,18 +3,24 @@ pragma solidity ^0.8;
 
 import { Test } from "forge-std/Test.sol";
 import { LibTestUtils as T } from "./LibTestUtils.sol";
-import { Game } from "~/Game.sol";
+import {
+    Game,
+    NULL_PLAYER,
+    getIndexFromPlayer,
+    MAX_PLAYERS,
+    MAX_ROUNDS,
+    MIN_WINNING_ASSET_BALANCE,
+    GOLD_IDX,
+    INVALID_PLAYER_IDX,
+    INCOME_AMOUNT
+} from "~/Game.sol";
 import { IPlayer } from "~/IPlayer.sol";
 import { LibBytes } from "~/LibBytes.sol";
 
 event PlayerCreated(address self, uint8 playerIdx, uint8 playerCount);
+event Building(uint16 round, uint256 goldBalance);
 
 contract GameTest is Test {
-    uint256 constant MAX_PLAYERS = 8;
-    uint8 constant MAX_ROUNDS = 101;
-    uint256 constant MIN_WINNING_ASSET_BALANCE = 100e18;
-    uint8 constant GOLD_IDX = 0;
-    uint8 constant INVALID_PLAYER_IDX = type(uint8).max;
 
     function test_deploysPlayersWithArgs() external {
         address gameAddress = _getNextDeployAddress();
@@ -139,6 +145,53 @@ contract GameTest is Test {
         assertTrue(game.isGameOver());
     }
 
+    function test_auctionWinnerBuildsBlock() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(EmitBuilderPlayer).creationCode
+        ]));
+        game.setMockBlockBuilder(players[1], 1337);
+        vm.expectCall(address(players[0]), abi.encodeCall(IPlayer.buildBlock, ()), 0);
+        vm.expectEmit(true, true, true, true, address(players[1]));
+        emit Building(0, INCOME_AMOUNT);
+        game.playRound();
+        assertEq(game.balanceOf(1, GOLD_IDX), INCOME_AMOUNT - 1337);
+    }
+
+    function test_panicsIfBuilderBidsWithDifferentBidThanAuction() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(EmitBuilderPlayer).creationCode
+        ]));
+        game.setMockBlockBuilder(players[1], 1338);
+        vm.expectRevert();
+        game.playRound();
+    }
+
+    function test_failsIfBuilderDoesNotIncludeOtherPlayers() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(EmitBuilderPlayer).creationCode
+        ]));
+        EmitBuilderPlayer(address(players[1])).ignorePlayer(players[0]);
+        game.setMockBlockBuilder(players[1], 1337);
+        vm.expectRevert(abi.encodeWithSelector(Game.PlayerMissingFromBlockError.selector, 1));
+        game.playRound();
+    }
+
+    // function test_auctionIgnoresBuilderThatDoesNotIncludeAll() external {
+    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+    //         type(NoopPlayer).creationCode,
+    //         type(EmitBuilderPlayer).creationCode
+    //     ]));
+    //     game.setMockBlockBuilder(players[1], 1337);
+    //     vm.expectCall(address(players[0]), abi.encodeCall(IPlayer.buildBlock, ()), 0);
+    //     vm.expectEmit(true, true, true, true, address(players[1]));
+    //     emit Building(0, INCOME_AMOUNT);
+    //     game.playRound();
+    //     assertEq(game.balanceOf(1, GOLD_IDX), INCOME_AMOUNT - 1337);
+    // }
+
     function _createGame(bytes[] memory playerCreationCodes)
         private returns (TestGame game, IPlayer[] memory players)
     {
@@ -216,44 +269,65 @@ contract GameTest is Test {
 
 contract TestGame is Game {
     IPlayer public mockWinner;
+    IPlayer public mockBuilder;
+    uint256 public mockBuilderBid;
 
     constructor(bytes[] memory playerCreationCodes, uint256[] memory deploySalts)
         Game(playerCreationCodes, deploySalts)
     {}
 
     function setMockWinner(IPlayer winner) external {
+        _assertValidPlayer(winner);
         mockWinner = winner;
+    }
+
+    function setMockBlockBuilder(IPlayer builder, uint256 bid) external {
+        _assertValidPlayer(builder);
+        mockBuilder = builder;
+        mockBuilderBid = bid;
+    }
+
+    function _auctionBlock(IPlayer[] memory players)
+        internal override returns (uint8 builderIdx, uint256 builderBid)
+    {
+        if (mockBuilder != NULL_PLAYER) {
+            return (getIndexFromPlayer(mockBuilder), mockBuilderBid);
+        }
+        return Game._auctionBlock(players);
     }
 
     function _findWinner(uint8 playerCount_, uint16 round_)
         internal override view returns (IPlayer winner)
     {
-        if (address(mockWinner) != address(0)) {
+        if (mockWinner != NULL_PLAYER) {
             return mockWinner;
         }
         return Game._findWinner(playerCount_, round_);
     }
+
+    function _assertValidPlayer(IPlayer player) private view {
+        assert(_playerByIdx[getIndexFromPlayer(player)] == player);
+    }
 }
 
 contract NoopPlayer is IPlayer {
-    constructor(uint8 playerIdx, uint8 playerCount) {
-        emit PlayerCreated(address(this), playerIdx, playerCount);
-    }
-
-    function turn(uint8) external {}
-    function buildBlock() external returns (uint256) {}
-}
-
-contract DonatingPlayer is IPlayer {
-    uint8 immutable PLAYER_IDX;
+    uint8 public PLAYER_IDX;
     uint8 immutable PLAYER_COUNT;
 
     constructor(uint8 playerIdx, uint8 playerCount) {
         PLAYER_IDX = playerIdx;
         PLAYER_COUNT = playerCount;
+        emit PlayerCreated(address(this), playerIdx, playerCount);
     }
 
-    function turn(uint8) external {
+    function turn(uint8) external virtual {}
+    function buildBlock() external virtual returns (uint256) {}
+}
+
+contract DonatingPlayer is NoopPlayer {
+    constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
+
+    function turn(uint8) external override {
         Game game = Game(msg.sender);
         uint8 assetCount = game.ASSET_COUNT();
         for (uint8 assetIdx = 1; assetIdx < assetCount; ++assetIdx) {
@@ -265,11 +339,29 @@ contract DonatingPlayer is IPlayer {
             );
         }
     }
-
-    function buildBlock() external returns (uint256) {}
 }
 
-contract RevertingPlayer is IPlayer {
-    function turn(uint8) external pure { T.throwInvalid(); }
-    function buildBlock() external pure returns (uint256) { T.throwInvalid(); }
+contract RevertingPlayer is NoopPlayer {
+    constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
+    function turn(uint8) external override pure { T.throwInvalid(); }
+    function buildBlock() external override pure returns (uint256) { T.throwInvalid(); }
+}
+
+contract EmitBuilderPlayer is NoopPlayer {
+    IPlayer public ignoredPlayer;
+    constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
+
+    function buildBlock() external override returns (uint256) {
+        Game game = Game(msg.sender);
+        emit Building(game.round(), game.balanceOf(PLAYER_IDX, GOLD_IDX));
+        for (uint8 i; i < PLAYER_COUNT; ++i) {
+            if (ignoredPlayer != NULL_PLAYER && getIndexFromPlayer(ignoredPlayer) == i) continue;
+            game.grantTurn(i);
+        }
+        return 1337;
+    }
+
+    function ignorePlayer(IPlayer player) external {
+        ignoredPlayer = player;
+    }
 }
