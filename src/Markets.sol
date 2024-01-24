@@ -3,23 +3,6 @@ pragma solidity ^0.8;
 uint256 constant MIN_LIQUIDITY_PER_RESERVE = 1e4;
 uint256 constant MAX_LIQUIDITY_PER_RESERVE = 1e32;
 
-// Computes the sqrt product of all the reserves.
-// function calcSqrtK(uint256[] memory reserves) pure returns (uint256 k_) {
-//     k_ = reserves[0];
-//     bool rooted;
-//     for (uint256 i = 1; i < reserves.length; ++i) {
-//         if (rooted) {
-//             k_ = k_ * sqrt(reserves[i]);
-//         } else if (UD60x18.unwrap(reserves[i]) > 1e32) {
-//             rooted = true;
-//             k_ = sqrt(k_) * sqrt(reserves[i]);
-//         } else {
-//             k_ = k_ * reserves[i];
-//         }
-//     }
-//     return rooted ? k_ : sqrt(k_);
-// }
-
 // A multidimensional virtual AMM for 18-decimal asset tokens.
 abstract contract AssetMarket {
 
@@ -109,7 +92,8 @@ abstract contract AssetMarket {
         if (toAmt == 0) return 0;
         if (toAmt >= toReserve) revert InsufficientLiquidityError();
         if (toReserve - toAmt < MIN_LIQUIDITY_PER_RESERVE) revert MinLiquidityError();
-        fromAmt = (toAmt * fromReserve) / (toReserve - toAmt);
+        uint256 d = toReserve - toAmt;
+        fromAmt = (toAmt * fromReserve + d - 1) / d;
         if (fromReserve + fromAmt > MAX_LIQUIDITY_PER_RESERVE) revert MaxLiquidityError();
         if (fromAmt == 0 || fromAmt < toAmt * fromReserve / toReserve) revert PrecisionError();
     }

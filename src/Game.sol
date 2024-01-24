@@ -29,7 +29,7 @@ contract Game is AssetMarket {
     uint16 _round;
     bool _inRound;
     mapping (uint8 playerIdx => mapping (uint8 assetIdx => uint256 balance)) public balanceOf;
-    mapping (uint8 playerIdx => IPlayer player) _playerByIdx;
+    mapping (uint8 playerIdx => IPlayer player) internal  _playerByIdx;
     IPlayer _builder;
     uint8 _isPlayerIncludedInRoundBitmap;
 
@@ -120,7 +120,10 @@ contract Game is AssetMarket {
         if (round_ >= MAX_ROUNDS) revert GameOverError();
         IPlayer[] memory players = _getAllPlayers();
         _distributeIncome(players);
-        _auctionBlock(players, round_);
+        {
+            (uint8 builderIdx, uint256 builderBid) = _auctionBlock(players);
+            _buildBlock(round_, players, builderIdx, builderBid);
+        }
         {
             IPlayer winner = _findWinner(uint8(players.length), round_);
             if (address(winner) != address(0)) {
@@ -146,18 +149,7 @@ contract Game is AssetMarket {
     function transfer(uint8 toPlayerIdx, uint8 assetIdx, uint256 amount) public {
         if (!_inRound) revert AccessError();
         uint8 fromPlayerIdx = _getIndexFromPlayer(IPlayer(msg.sender));
-        _assertValidAsset(assetIdx);
-        // Sender and receiver must be players.
-        if (address(_playerByIdx[fromPlayerIdx]) != msg.sender ||
-            address(_playerByIdx[toPlayerIdx]) == address(0))
-        {
-            revert AccessError();
-        }
-        uint256 fromBal = balanceOf[fromPlayerIdx][assetIdx];
-        if (fromBal < amount) revert InsufficientBalanceError(fromPlayerIdx, assetIdx);
-        balanceOf[fromPlayerIdx][assetIdx] = fromBal - amount;
-        balanceOf[toPlayerIdx][assetIdx] += amount;
-        emit Transfer(fromPlayerIdx, toPlayerIdx, assetIdx, amount);
+        _transfer(fromPlayerIdx, toPlayerIdx, assetIdx, amount);
     }
 
     function takeTurn(uint8 playerIdx) external onlyBuilder returns (bool success) {
@@ -245,7 +237,7 @@ contract Game is AssetMarket {
     }
 
     function _findWinner(uint8 playerCount_, uint16 round_)
-        private view returns (IPlayer winner)
+        internal virtual view returns (IPlayer winner)
     {
         // Find which player has the maximum balance of any asset that isn't gold.
         uint8 nAssets = ASSET_COUNT;
@@ -274,28 +266,8 @@ contract Game is AssetMarket {
         return _playerByIdx[maxBalancePlayerIdx];
     }
 
-    function _auctionBlock(IPlayer[] memory players, uint16 round_) private {
-        uint256 maxBid;
-        uint8 maxBidPlayerIdx;
-        for (uint8 i; i < players.length; ++i) {
-            uint256 bid = _simulateBuildPlayerBlock(players, i);
-            if (bid != 0) emit BlockBid(i, bid);
-            if (bid > maxBid) {
-                maxBid = bid;
-                maxBidPlayerIdx = i;
-            }
-        }
-        if (maxBid != 0) {
-            assert(_buildPlayerBlock(players, maxBidPlayerIdx) == maxBid);
-            emit PlayerBlockBuilt(round_, maxBidPlayerIdx);
-        } else {
-            _buildDefaultBlock(players, round_);
-            emit DefaultBlockBuilt(round_);
-        }
-    }
-
     function _simulateBuildPlayerBlock(IPlayer[] memory players, uint8 builderIdx)
-        private returns (uint256 bid)
+        internal returns (uint256 bid)
     {
         IPlayer builder = players[builderIdx];
         try this.buildPlayerBlockAndRevert(builder) {
@@ -313,7 +285,7 @@ contract Game is AssetMarket {
     }
 
     function _buildPlayerBlock(IPlayer[] memory players, uint8 builderIdx)
-        private returns (uint256 bid)
+        internal returns (uint256 bid)
     {
         IPlayer builder = players[builderIdx];
         assert(address(_builder) == address(0));
@@ -335,7 +307,7 @@ contract Game is AssetMarket {
     }
 
     function _safeCallPlayerBuild(IPlayer builder)
-        private returns (bool success, uint256 bid, bytes memory errData)
+        internal returns (bool success, uint256 bid, bytes memory errData)
     {
         bytes memory resultData;
         (success, resultData) = address(builder).safeCall(
@@ -371,26 +343,46 @@ contract Game is AssetMarket {
         }
     }
 
-    function _getAllPlayers() private view returns (IPlayer[] memory players) {
-        uint8 n = playerCount;
-        players = new IPlayer[](n);
-        for (uint8 i; i < n; ++i) {
-            players[i] = _playerByIdx[i];
-        }
-    }
-
     function _getValidPlayerIdx(IPlayer player) private view returns (uint8 playerIdx) {
         playerIdx = _getIndexFromPlayer(player);
         if (_playerByIdx[playerIdx] != player) revert InvalidPlayerError();
     }
 
-    function _getIndexFromPlayer(IPlayer player) private pure returns (uint8 playerIdx) {
+    function _getIndexFromPlayer(IPlayer player) internal pure returns (uint8 playerIdx) {
         // The deployment process in the constructor ensures that the lowest 3 bits of the
         // player's address is also its player index.
         return uint8(uint160(address(player)) & PLAYER_ADDRESS_INDEX_MASK);
     }
 
-    function _distributeIncome(IPlayer[] memory players) private {
+    function _auctionBlock(IPlayer[] memory players)
+        internal virtual returns (uint8 builderIdx, uint256 builderBid)
+    {
+        for (uint8 i; i < players.length; ++i) {
+            uint256 bid = _simulateBuildPlayerBlock(players, i);
+            if (bid != 0) emit BlockBid(i, bid);
+            if (bid > builderBid) {
+                builderBid = bid;
+                builderIdx = i;
+            }
+        }
+    }
+
+    function _buildBlock(
+        uint16 round_,
+        IPlayer[] memory players,
+        uint8 builderIdx,
+        uint256 builderBid
+    ) private {
+        if (builderBid != 0) {
+            assert(_buildPlayerBlock(players, builderIdx) == builderBid);
+            emit PlayerBlockBuilt(round_, builderIdx);
+        } else {
+            _buildDefaultBlock(players, round_);
+            emit DefaultBlockBuilt(round_);
+        }
+    }
+
+    function _distributeIncome(IPlayer[] memory players) internal {
         uint8 numAssets = ASSET_COUNT;
         // Mint 1 unit of each type of asset to each player.
         for (uint8 playerIdx; playerIdx < players.length; ++playerIdx) {
@@ -400,12 +392,35 @@ contract Game is AssetMarket {
         }
     }
 
-    function _mintAssetTo(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) private {
+    function _getAllPlayers() internal view returns (IPlayer[] memory players) {
+        uint8 n = playerCount;
+        players = new IPlayer[](n);
+        for (uint8 i; i < n; ++i) {
+            players[i] = _playerByIdx[i];
+        }
+    }
+
+    function _transfer(uint8 fromPlayerIdx, uint8 toPlayerIdx, uint8 assetIdx, uint256 amount) internal {
+        _assertValidAsset(assetIdx);
+        // Sender and receiver must be players.
+        if (address(_playerByIdx[fromPlayerIdx]) == address(0) ||
+            address(_playerByIdx[toPlayerIdx]) == address(0))
+        {
+            revert AccessError();
+        }
+        uint256 fromBal = balanceOf[fromPlayerIdx][assetIdx];
+        if (fromBal < amount) revert InsufficientBalanceError(fromPlayerIdx, assetIdx);
+        balanceOf[fromPlayerIdx][assetIdx] = fromBal - amount;
+        balanceOf[toPlayerIdx][assetIdx] += amount;
+        emit Transfer(fromPlayerIdx, toPlayerIdx, assetIdx, amount);
+    }
+
+    function _mintAssetTo(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) internal {
         balanceOf[playerIdx][assetIdx] += assetAmount;
         emit Mint(playerIdx, assetIdx, assetAmount);
     }
 
-    function _burnAssetFrom(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) private {
+    function _burnAssetFrom(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) internal {
         uint256 bal = balanceOf[playerIdx][assetIdx];
         if (bal < assetIdx) revert InsufficientBalanceError(playerIdx, assetIdx);
         balanceOf[playerIdx][assetIdx] = bal - assetAmount;

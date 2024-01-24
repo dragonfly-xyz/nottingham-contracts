@@ -16,7 +16,7 @@ contract GameTest is Test {
     uint8 constant GOLD_IDX = 0;
     uint8 constant INVALID_PLAYER_IDX = type(uint8).max;
 
-    function testDeploysPlayersWithArgs() external {
+    function test_deploysPlayersWithArgs() external {
         address gameAddress = _getNextDeployAddress();
         uint256 playerCount = T.randomUint256() % 5 + 2;
         bytes[] memory creationCodes = new bytes[](playerCount);
@@ -33,7 +33,7 @@ contract GameTest is Test {
         assertEq(address(game), gameAddress); 
     }
 
-    function testCreatesNAssets() external {
+    function test_createsNAssets() external {
         uint256 playerCount = T.randomUint256() % 5 + 2;
         bytes[] memory creationCodes = new bytes[](playerCount);
         for (uint256 i; i < playerCount; ++i) {
@@ -43,21 +43,21 @@ contract GameTest is Test {
         assertEq(game.ASSET_COUNT(), playerCount);
     }
 
-    function testCannotDeployGameWithLessThanTwoPlayers() external {
+    function test_cannotDeployGameWithLessThanTwoPlayers() external {
         bytes[] memory creationCodes = new bytes[](1);
         uint256[] memory salts = new uint256[](1);
         vm.expectRevert(abi.encodeWithSelector(Game.GameSetupError.selector, ('# of players')));
         new Game(creationCodes, salts);
     }
 
-    function testCannotDeployGameWithMoreThanEightPlayers() external {
+    function test_cannotDeployGameWithMoreThanEightPlayers() external {
         bytes[] memory creationCodes = new bytes[](9);
         uint256[] memory salts = new uint256[](9);
         vm.expectRevert(abi.encodeWithSelector(Game.GameSetupError.selector, ('# of players')));
         new Game(creationCodes, salts);
     }
 
-    function testCannotDeployGameWithFailingPlayerInitCode() external {
+    function test_cannotDeployGameWithFailingPlayerInitCode() external {
         bytes[] memory creationCodes = new bytes[](2);
         creationCodes[0] = hex'fe';
         uint256[] memory salts = new uint256[](2);
@@ -65,7 +65,7 @@ contract GameTest is Test {
         new Game(creationCodes, salts);
     }
     
-    function testCanPlayRoundWithRevertingPlayers() external {
+    function test_canPlayRoundWithRevertingPlayers() external {
         (Game game,) = _createGame(T.toDynArray([
             type(RevertingPlayer).creationCode,
             type(RevertingPlayer).creationCode
@@ -74,7 +74,7 @@ contract GameTest is Test {
         assertEq(winnerIdx, INVALID_PLAYER_IDX);
     }
 
-    function testCanCompleteGameWithNoopPlayers() external {
+    function test_canCompleteGameWithNoopPlayers() external {
         (Game game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode
@@ -88,9 +88,10 @@ contract GameTest is Test {
         (uint8 assetIdx, uint256 bal) = _getMaxNonGoldAssetBalance(game, winnerIdx);
         assertTrue(assetIdx != GOLD_IDX);
         assertGe(bal, MIN_WINNING_ASSET_BALANCE);
+        assertTrue(game.isGameOver());
     }
 
-    function testCanCompleteGameWithDonatingPlayer() external {
+    function test_canCompleteGameWithDonatingPlayer() external {
         (Game game,) = _createGame(T.toDynArray([
             type(DonatingPlayer).creationCode,
             type(NoopPlayer).creationCode
@@ -105,14 +106,45 @@ contract GameTest is Test {
         assertEq(assetIdx, GOLD_IDX + 1);
         assertGe(bal, MIN_WINNING_ASSET_BALANCE);
         assertEq(game.round(), MAX_ROUNDS / 2 - 1);
+        assertTrue(game.isGameOver());
+    }
+
+    function test_cannotPlayAnotherRoundAfterWinnerDeclared() external {
+        (Game game,) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        uint8 winnerIdx;
+        while (true) {
+            winnerIdx = game.playRound();
+            if (winnerIdx != INVALID_PLAYER_IDX) break;
+        }
+        assertEq(winnerIdx, 0);
+        (uint8 assetIdx, uint256 bal) = _getMaxNonGoldAssetBalance(game, winnerIdx);
+        assertTrue(assetIdx != GOLD_IDX);
+        assertGe(bal, MIN_WINNING_ASSET_BALANCE);
+        assertTrue(game.isGameOver());
+        vm.expectRevert(Game.GameOverError.selector);
+        game.playRound();
+    }
+
+    function test_gameEndsEarlyIfWinnerFound() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        game.setMockWinner(players[1]);
+        uint8 winnerIdx = game.playRound();
+        assertEq(winnerIdx, 1);
+        assertTrue(game.isGameOver());
     }
 
     function _createGame(bytes[] memory playerCreationCodes)
-        private returns (Game game, IPlayer[] memory players)
+        private returns (TestGame game, IPlayer[] memory players)
     {
         uint256[] memory salts;
         (salts, players) = _minePlayers(_getNextDeployAddress(), playerCreationCodes);
-        game = new Game(playerCreationCodes, salts);
+        game = new TestGame(playerCreationCodes, salts);
     }
 
     function _minePlayers(address deployer, bytes[] memory playerCreationCodes)
@@ -179,6 +211,27 @@ contract GameTest is Test {
                 maxAssetBal = bal;
             }
         }
+    }
+}
+
+contract TestGame is Game {
+    IPlayer public mockWinner;
+
+    constructor(bytes[] memory playerCreationCodes, uint256[] memory deploySalts)
+        Game(playerCreationCodes, deploySalts)
+    {}
+
+    function setMockWinner(IPlayer winner) external {
+        mockWinner = winner;
+    }
+
+    function _findWinner(uint8 playerCount_, uint16 round_)
+        internal override view returns (IPlayer winner)
+    {
+        if (address(mockWinner) != address(0)) {
+            return mockWinner;
+        }
+        return Game._findWinner(playerCount_, round_);
     }
 }
 

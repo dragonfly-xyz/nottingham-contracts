@@ -59,6 +59,7 @@ function clampBuyAmount(uint256 buyAmount, uint256 reserveAmount)
 }
 
 function createTestMarket(uint8 assetCount) returns (TestMarket market) {
+    assert(assetCount >= 2);
     uint256[] memory reserves = new uint256[](assetCount);
     for (uint8 i; i < assetCount; ++i) {
         reserves[i] = 100e18 / (10 ** i);
@@ -66,12 +67,21 @@ function createTestMarket(uint8 assetCount) returns (TestMarket market) {
     market = new TestMarket(reserves);
 }
 
+function createTestMarket(uint8 assetCount, uint256 maxReserve) returns (TestMarket market) {
+    assert(assetCount >= 2);
+    uint256[] memory reserves = new uint256[](assetCount);
+    for (uint8 i; i < assetCount; ++i) {
+        reserves[i] = maxReserve / (10 ** i);
+    }
+    market = new TestMarket(reserves);
+}
+
 contract TestMarket is AssetMarket {
     uint256 public immutable INITIAL_K;
     
-    constructor(uint256[] memory reserves) AssetMarket(uint8(reserves.length)) {
-        _init(reserves);
-        INITIAL_K = calcK(reserves);
+    constructor(uint256[] memory reserves_) AssetMarket(uint8(reserves_.length)) {
+        _init(reserves_);
+        INITIAL_K = calcK(reserves_);
     }
 
     function buy(uint8 fromIdx, uint8 toIdx, uint256 toAmt)
@@ -90,6 +100,13 @@ contract TestMarket is AssetMarket {
         return _getReserve(idx);
     }
 
+    function reserves() external view returns (uint256[] memory reserves_) {
+        reserves_ = new uint256[](ASSET_COUNT);
+        for (uint8 i; i < ASSET_COUNT; ++i) {
+            reserves_[i] = _getReserve(i);
+        }
+    }
+
     function quoteBuy(uint8 fromIdx, uint8 toIdx, uint256 toAmt)
         external view returns (uint256 fromAmt)
     {
@@ -103,10 +120,14 @@ contract TestMarket is AssetMarket {
     }
 
     function k() external view returns (uint256 k_) {
-        uint256[] memory reserves = new uint256[](ASSET_COUNT);
+        uint256[] memory reserves_ = new uint256[](ASSET_COUNT);
         for (uint8 i; i < ASSET_COUNT; ++i) {
-            reserves[i] = _getReserve(i);
+            reserves_[i] = _getReserve(i);
         }
-        return calcK(reserves);
+        return calcK(reserves_);
+    }
+
+    function rate(uint8 fromIdx, uint8 toIdx) external view returns (uint256 rate_) {
+        return _getRate(fromIdx, toIdx);
     }
 }

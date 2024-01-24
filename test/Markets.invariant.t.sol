@@ -3,7 +3,7 @@ pragma solidity ^0.8;
 import { Test } from "forge-std/Test.sol";
 import { LibTestUtils as T } from "./LibTestUtils.sol";
 import { AssetMarket } from "~/Markets.sol";
-import { calcK, clampBuyAmount, clampSellAmount, TestMarket } from "./MarketTestUtils.sol";
+import { calcK, clampBuyAmount, clampSellAmount, TestMarket, createTestMarket } from "./MarketTestUtils.sol";
 
 contract MultiMarket is Test {
     uint8 immutable MAX_ASSET_COUNT;
@@ -12,26 +12,31 @@ contract MultiMarket is Test {
 
     constructor(uint8 maxAssetCount) {
         MAX_ASSET_COUNT = maxAssetCount;
+        for (uint8 i = 2; i <= maxAssetCount; ++i) {
+            TestMarket market = createTestMarket(i);
+            _markets.push(market);
+            _marketByAssetCount[i] = market;
+        }
     }
 
-    function buyMarket(uint8 marketIdx, uint8 fromIdx, uint8 toIdx, uint256 toAmt)
+    function buyMarket(uint8 assetCount, uint8 fromIdx, uint8 toIdx, uint256 toAmt)
         external returns (uint256 fromAmt)
     {
-        marketIdx = uint8(bound(marketIdx, 0, MAX_ASSET_COUNT));
-        TestMarket market = _getOrCreateMarket(marketIdx);
-        fromIdx = uint8(bound(fromIdx, 0, marketIdx));
-        toIdx = uint8(bound(toIdx, 0, marketIdx));
-        // toAmt = bound(toIdx, 0, clampBuyAmount(toAmt, market.reserve(toIdx)));
+        assetCount = uint8(bound(assetCount, 2, MAX_ASSET_COUNT));
+        TestMarket market = _marketByAssetCount[assetCount];
+        fromIdx = uint8(bound(fromIdx, 0, assetCount - 1));
+        toIdx = uint8(bound(toIdx, 0, assetCount - 1));
+        toAmt = bound(toIdx, 0, clampBuyAmount(toAmt, market.reserve(toIdx)));
         return market.buy(fromIdx, toIdx, toAmt);
     }
 
-    function sellMarket(uint8 marketIdx, uint8 fromIdx, uint8 toIdx, uint256 fromAmt)
+    function sellMarket(uint8 assetCount, uint8 fromIdx, uint8 toIdx, uint256 fromAmt)
         external returns (uint256 toAmt)
     {
-        marketIdx = uint8(bound(marketIdx, 0, MAX_ASSET_COUNT));
-        TestMarket market = _getOrCreateMarket(marketIdx);
-        fromIdx = uint8(bound(fromIdx, 0, marketIdx));
-        toIdx = uint8(bound(toIdx, 0, marketIdx));
+        assetCount = uint8(bound(assetCount, 2, MAX_ASSET_COUNT));
+        TestMarket market = _marketByAssetCount[assetCount];
+        fromIdx = uint8(bound(fromIdx, 0, assetCount - 1));
+        toIdx = uint8(bound(toIdx, 0, assetCount - 1));
         fromAmt = bound(toIdx, 0, clampSellAmount(fromAmt, market.reserve(fromIdx)));
         return market.sell(fromIdx, toIdx, fromAmt);
     }
@@ -43,20 +48,6 @@ contract MultiMarket is Test {
     function getAllMarkets() external view returns (TestMarket[] memory markets) {
         markets = _markets;
     }
-
-    function _getOrCreateMarket(uint8 assetCount) private returns (TestMarket market) {
-        market = _marketByAssetCount[assetCount];
-        if (address(market) != address(0)) {
-            return market;
-        }
-        uint256[] memory reserves = new uint256[](assetCount);
-        for (uint8 i; i < assetCount; ++i) {
-            reserves[i] = 100e18 / (10 ** i);
-        }
-        market = new TestMarket(reserves);
-        _markets.push(market);
-        _marketByAssetCount[assetCount] = market;
-    }
 }
 
 contract MarketsInvariantTest is Test {
@@ -64,12 +55,20 @@ contract MarketsInvariantTest is Test {
    
     function setUp() external {
         markets = new MultiMarket(5);
+        targetContract(address(markets));
     }
 
-    function invariant_K() external {
+    function invariant_k() external {
         TestMarket[] memory markets_ = markets.getAllMarkets();
         for (uint8 i; i < markets_.length; ++i) {
-            assertEq(markets_[i].k(), markets_[i].INITIAL_K());
+            _assertK(markets_[i]);
         }
+    }
+
+    function _assertK(TestMarket market) private {
+        uint256 initialK = market.INITIAL_K();
+        uint256 k = market.k();
+        assertApproxEqRel(k, initialK, 1e14, 'k');
+        assertGe(k, initialK, "k' >= k");
     }
 } 

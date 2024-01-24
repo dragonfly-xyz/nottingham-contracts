@@ -128,6 +128,96 @@ library LibTestUtils {
         }
     }
 
+    function toDynArray(address[1] memory fixedArr)
+        internal pure returns (address[] memory dynArr)
+    {
+        dynArr = new address[](fixedArr.length);
+        for (uint256 i; i < fixedArr.length; ++i) {
+            dynArr[i] = fixedArr[i];
+        }
+    }
+
+    function toDynArray(address[2] memory fixedArr)
+        internal pure returns (address[] memory dynArr)
+    {
+        dynArr = new address[](fixedArr.length);
+        for (uint256 i; i < fixedArr.length; ++i) {
+            dynArr[i] = fixedArr[i];
+        }
+    }
+
+    function toDynArray(address[3] memory fixedArr)
+        internal pure returns (address[] memory dynArr)
+    {
+        dynArr = new address[](fixedArr.length);
+        for (uint256 i; i < fixedArr.length; ++i) {
+            dynArr[i] = fixedArr[i];
+        }
+    }
+
+    function toDynArray(address[4] memory fixedArr)
+        internal pure returns (address[] memory dynArr)
+    {
+        dynArr = new address[](fixedArr.length);
+        for (uint256 i; i < fixedArr.length; ++i) {
+            dynArr[i] = fixedArr[i];
+        }
+    }
+
+    function toDynArray(address[5] memory fixedArr)
+        internal pure returns (address[] memory dynArr)
+    {
+        dynArr = new address[](fixedArr.length);
+        for (uint256 i; i < fixedArr.length; ++i) {
+            dynArr[i] = fixedArr[i];
+        }
+    }
+
+    function toDynArray(uint256[1] memory fixedArr)
+        internal pure returns (uint256[] memory dynArr)
+    {
+        dynArr = new uint256[](fixedArr.length);
+        for (uint256 i; i < fixedArr.length; ++i) {
+            dynArr[i] = fixedArr[i];
+        }
+    }
+
+    function toDynArray(uint256[2] memory fixedArr)
+        internal pure returns (uint256[] memory dynArr)
+    {
+        dynArr = new uint256[](fixedArr.length);
+        for (uint256 i; i < fixedArr.length; ++i) {
+            dynArr[i] = fixedArr[i];
+        }
+    }
+
+    function toDynArray(uint256[3] memory fixedArr)
+        internal pure returns (uint256[] memory dynArr)
+    {
+        dynArr = new uint256[](fixedArr.length);
+        for (uint256 i; i < fixedArr.length; ++i) {
+            dynArr[i] = fixedArr[i];
+        }
+    }
+
+    function toDynArray(uint256[4] memory fixedArr)
+        internal pure returns (uint256[] memory dynArr)
+    {
+        dynArr = new uint256[](fixedArr.length);
+        for (uint256 i; i < fixedArr.length; ++i) {
+            dynArr[i] = fixedArr[i];
+        }
+    }
+
+    function toDynArray(uint256[5] memory fixedArr)
+        internal pure returns (uint256[] memory dynArr)
+    {
+        dynArr = new uint256[](fixedArr.length);
+        for (uint256 i; i < fixedArr.length; ++i) {
+            dynArr[i] = fixedArr[i];
+        }
+    }
+
     function throwInvalid() internal pure {
         assembly ("memory-safe") {
             invalid()

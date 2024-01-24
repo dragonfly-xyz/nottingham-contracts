@@ -7,4 +7,6 @@ remappings = [
     "~=src/"
 ]
 
+[invariant]
+fail_on_revert=true
 # See more config options https://github.com/foundry-rs/foundry/tree/master/config
