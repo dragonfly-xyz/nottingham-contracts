@@ -158,6 +158,8 @@ contract GameTest is Test {
         assertEq(game.balanceOf(1, GOLD_IDX), INCOME_AMOUNT - 1337);
     }
 
+    // This state should be unreachable under normal conditions because the auction
+    // process will filter out this activity.
     function test_panicsIfBuilderBidsWithDifferentBidThanAuction() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
@@ -168,6 +170,8 @@ contract GameTest is Test {
         game.playRound();
     }
 
+    // This state should be unreachable under normal conditions because the auction
+    // process will filter out this activity.
     function test_failsIfBuilderDoesNotIncludeOtherPlayers() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
