@@ -31,7 +31,7 @@ library LibBytes {
             return defaultValue;
         }
         assembly ("memory-safe") {
-            selector := shl(224, shr(224, mload(buf)))
+            selector := shl(224, shr(224, mload(add(buf, 0x20))))
         }
     }
 

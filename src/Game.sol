@@ -17,8 +17,8 @@ uint256 constant MIN_WINNING_ASSET_BALANCE = 100e18;
 uint256 constant MARKET_STARTING_GOLD = 200e18;
 uint256 constant MARKET_STARTING_GOODS = 100e18;
 uint8 constant INVALID_PLAYER_IDX = type(uint8).max;
-uint256 constant MAX_TURN_GAS = 32e3;
-uint256 constant MAX_BUILD_GAS = 256e3;
+uint256 constant MAX_TURN_GAS = 32e6;
+uint256 constant MAX_BUILD_GAS = 256e6;
 uint256 constant MAX_RETURN_DATA_SIZE = 8192;
 uint256 constant INCOME_AMOUNT = 1e18;
 
@@ -35,7 +35,7 @@ contract Game is AssetMarket {
     address public immutable GM;
 
     uint8 public playerCount;
-    uint16 _round;
+    uint16 internal _round;
     bool _inRound;
     mapping (uint8 playerIdx => mapping (uint8 assetIdx => uint256 balance)) public balanceOf;
     mapping (uint8 playerIdx => IPlayer player) internal  _playerByIdx;
@@ -156,9 +156,9 @@ contract Game is AssetMarket {
         _inRound = false;
     }
     
-    function findWinner() external view returns (bool hasWinner, uint8 winnerIdx) {
+    function findWinner() external view returns (uint8 winnerIdx) {
         IPlayer winner = _findWinner(playerCount, _round);
-        return winner == NULL_PLAYER ? (false, 0) : (true, getIndexFromPlayer(winner));
+        return winner == NULL_PLAYER ? INVALID_PLAYER_IDX : getIndexFromPlayer(winner);
     }
 
     function transfer(uint8 toPlayerIdx, uint8 assetIdx, uint256 amount) public duringBlock {
@@ -246,6 +246,10 @@ contract Game is AssetMarket {
         }
     }
 
+    function assetCount() external view returns (uint8) {
+        return ASSET_COUNT;
+    }
+
     function isGameOver() public view returns (bool) {
         return _round >= MAX_ROUNDS;
     }
@@ -277,6 +281,7 @@ contract Game is AssetMarket {
             return NULL_PLAYER;
         }
         // After max rounds, whomever has the highest balance wins.
+        if (maxBalanceAssetIdx == 0) return NULL_PLAYER;
         return _playerByIdx[maxBalancePlayerIdx];
     }
 
@@ -290,7 +295,7 @@ contract Game is AssetMarket {
         } catch (bytes memory data) {
             bytes4 selector = data.getSelectorOr(bytes4(0));
             if (selector == BuildPlayerBlockAndRevertSuccess.selector) {
-                data.trimLeadingBytesDestructive(4);
+                data = data.trimLeadingBytesDestructive(4);
                 bid = abi.decode(data, (uint256));
             } else {
                 emit BuildPlayerBlockFailedWarning(data);
@@ -338,7 +343,7 @@ contract Game is AssetMarket {
         }
     }
 
-    function _buildDefaultBlock(IPlayer[] memory players, uint16 round_) private {
+    function _buildDefaultBlock(IPlayer[] memory players, uint16 round_) internal virtual {
         assert(_builder == NULL_PLAYER);
         _builder = DEFAULT_BUILDER;
         // Default blocks just use round-robin ordering of players.
@@ -348,7 +353,7 @@ contract Game is AssetMarket {
         _builder = NULL_PLAYER;
     }
 
-    function _safeCallTurn(IPlayer player, uint8 builderIdx) private returns (bool success) {
+    function _safeCallTurn(IPlayer player, uint8 builderIdx) internal virtual returns (bool success) {
         bytes memory resultData;
         (success, resultData) = address(player).safeCall(
             abi.encodeCall(IPlayer.turn, (builderIdx)),
@@ -384,7 +389,7 @@ contract Game is AssetMarket {
         IPlayer[] memory players,
         uint8 builderIdx,
         uint256 builderBid
-    ) private {
+    ) internal {
         if (builderBid != 0) {
             assert(_buildPlayerBlock(players, builderIdx) == builderBid);
             emit PlayerBlockBuilt(round_, builderIdx);
@@ -422,8 +427,10 @@ contract Game is AssetMarket {
         }
         uint256 fromBal = balanceOf[fromPlayerIdx][assetIdx];
         if (fromBal < amount) revert InsufficientBalanceError(fromPlayerIdx, assetIdx);
-        balanceOf[fromPlayerIdx][assetIdx] = fromBal - amount;
-        balanceOf[toPlayerIdx][assetIdx] += amount;
+        unchecked {
+            balanceOf[fromPlayerIdx][assetIdx] = fromBal - amount;
+            balanceOf[toPlayerIdx][assetIdx] += amount;
+        }
         emit Transfer(fromPlayerIdx, toPlayerIdx, assetIdx, amount);
     }
 
@@ -434,8 +441,10 @@ contract Game is AssetMarket {
 
     function _burnAssetFrom(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) internal {
         uint256 bal = balanceOf[playerIdx][assetIdx];
-        if (bal < assetIdx) revert InsufficientBalanceError(playerIdx, assetIdx);
-        balanceOf[playerIdx][assetIdx] = bal - assetAmount;
+        if (bal < assetAmount) revert InsufficientBalanceError(playerIdx, assetIdx);
+        unchecked {
+            balanceOf[playerIdx][assetIdx] = bal - assetAmount;
+        }
         emit Burn(playerIdx, assetIdx, assetAmount);
     }
 

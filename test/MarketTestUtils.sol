@@ -107,6 +107,10 @@ contract TestMarket is AssetMarket {
         }
     }
 
+    function assetCount() external view returns (uint8) {
+        return ASSET_COUNT;
+    }
+
     function quoteBuy(uint8 fromIdx, uint8 toIdx, uint256 toAmt)
         external view returns (uint256 fromAmt)
     {

@@ -13,7 +13,7 @@ abstract contract AssetMarket {
     error MinKError();
     error PrecisionError();
 
-    uint8 public immutable ASSET_COUNT;
+    uint8 internal immutable ASSET_COUNT;
     mapping (uint8 => uint256) private _reserves;
 
     constructor(uint8 assetCount) {

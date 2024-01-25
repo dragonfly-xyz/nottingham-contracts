@@ -68,9 +68,10 @@ contract MarketTest is Test {
         assertGt(sellAmount, 1e16);
         _assertK(m);
     }
+    
     function test_canBuyPct(uint16 bps) external {
         TestMarket m = createTestMarket(5);
-        uint8 assetCount = m.ASSET_COUNT();
+        uint8 assetCount = m.assetCount();
         for (uint256 i; i < assetCount; ++i) {
             uint256[] memory reserves = m.reserves();
             uint8 fromIdx = uint8((i + 0) % assetCount);
@@ -86,7 +87,7 @@ contract MarketTest is Test {
 
     function test_canSellPct(uint16 bps) external {
         TestMarket m = createTestMarket(5);
-        uint8 assetCount = m.ASSET_COUNT();
+        uint8 assetCount = m.assetCount();
         for (uint256 i; i < assetCount; ++i) {
             uint256[] memory reserves = m.reserves();
             uint8 fromIdx = uint8((i + 0) % assetCount);
@@ -102,7 +103,7 @@ contract MarketTest is Test {
 
     function test_canBuyThenSellSymmetricallyAcrossPools(uint16 bps) external {
         TestMarket m = createTestMarket(5);
-        uint8 assetCount = m.ASSET_COUNT();
+        uint8 assetCount = m.assetCount();
         for (uint256 i; i < assetCount; ++i) {
             uint256[] memory reserves = m.reserves();
             uint8 fromIdx = uint8((i + 0) % assetCount);
@@ -124,7 +125,7 @@ contract MarketTest is Test {
 
     function test_canSellThenBuySymmetricallyAcrossPools(uint16 bps) external {
         TestMarket m = createTestMarket(5);
-        uint8 assetCount = m.ASSET_COUNT();
+        uint8 assetCount = m.assetCount();
         for (uint256 i; i < assetCount; ++i) {
             uint256[] memory reserves = m.reserves();
             uint8 fromIdx = uint8((i + 0) % assetCount);
