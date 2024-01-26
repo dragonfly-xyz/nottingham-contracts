@@ -583,6 +583,37 @@ contract GameTest is Test {
         game.transfer(2, GOLD_IDX, 1);
     }
 
+    function test_transfer_adjustsBalances() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        game.setCurrentBuilder(DEFAULT_BUILDER);
+        uint8 assetCount = game.assetCount();
+        uint8 asset = uint8((assetCount + T.randomUint256()) % assetCount);
+        game.mintAssetTo(players[0], asset, 100);
+        game.mintAssetTo(players[1], asset, 100);
+        vm.prank(address(players[0]));
+        game.transfer(1, asset, 33);
+        assertEq(game.balanceOf(0, asset), 67);
+        assertEq(game.balanceOf(1, asset), 133);
+    }
+
+    function test_transfer_cannotTransferMoreThanBalance() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        game.setCurrentBuilder(DEFAULT_BUILDER);
+        uint8 assetCount = game.assetCount();
+        uint8 asset = uint8((assetCount + T.randomUint256()) % assetCount);
+        game.mintAssetTo(players[0], asset, 100);
+        game.mintAssetTo(players[1], asset, 100);
+        vm.expectRevert(abi.encodeWithSelector(Game.InsufficientBalanceError.selector, 0, asset));
+        vm.prank(address(players[0]));
+        game.transfer(1, asset, 101);
+    }
+
     function test_grantTurn_cannotBeCalledByNonBuilderDuringDefaultBlock() external {
         (TestGame game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
@@ -841,6 +872,61 @@ contract GameTest is Test {
         assertEq(game.balanceOf(1, fromAsset), 100);
         assertEq(game.balanceOf(1, toAsset), 100);
     }
+
+    function test_buy_cannotSellMoreThanCallerBalance() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        game.setCurrentBuilder(players[1]);
+        uint8 assetCount = game.assetCount();
+        uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
+        uint8 toAsset = uint8((fromAsset + 1) % assetCount);
+        game.mintAssetTo(players[0], fromAsset, 100);
+        game.mintAssetTo(players[0], toAsset, 100);
+        uint256 buyAmount = game.quoteSell(fromAsset, toAsset, 101);
+        vm.expectRevert(abi.encodeWithSelector(Game.InsufficientBalanceError.selector, 0, fromAsset));
+        vm.prank(address(players[0]));
+        game.buy(fromAsset, toAsset, buyAmount);
+    }
+
+    function test_sell_cannotSellMoreThanCallerBalance() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        game.setCurrentBuilder(players[1]);
+        uint8 assetCount = game.assetCount();
+        uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
+        uint8 toAsset = uint8((fromAsset + 1) % assetCount);
+        game.mintAssetTo(players[0], fromAsset, 100);
+        game.mintAssetTo(players[0], toAsset, 100);
+        vm.expectRevert(abi.encodeWithSelector(Game.InsufficientBalanceError.selector, 0, fromAsset));
+        vm.prank(address(players[0]));
+        game.sell(fromAsset, toAsset, 101);
+    }
+
+    // function test_sell_adjustBalances() external {
+    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+    //         type(NoopPlayer).creationCode,
+    //         type(NoopPlayer).creationCode
+    //     ]));
+    //     game.setCurrentBuilder(players[1]);
+    //     uint8 assetCount = game.assetCount();
+    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
+    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
+    //     game.mintAssetTo(players[0], fromAsset, 100);
+    //     game.mintAssetTo(players[0], toAsset, 100);
+    //     game.mintAssetTo(players[1], fromAsset, 100);
+    //     game.mintAssetTo(players[1], toAsset, 100);
+    //     uint256 sellAmount = 4;
+    //     vm.prank(address(players[0]));
+    //     uint256 buyAmount = game.sell(fromAsset, toAsset, sellAmount);
+    //     assertEq(game.balanceOf(0, fromAsset), 100 - sellAmount);
+    //     assertEq(game.balanceOf(0, toAsset), 100 + buyAmount);
+    //     assertEq(game.balanceOf(1, fromAsset), 100);
+    //     assertEq(game.balanceOf(1, toAsset), 100);
+    // }
 
     function _createGame(bytes[] memory playerCreationCodes)
         private returns (TestGame game, IPlayer[] memory players)
