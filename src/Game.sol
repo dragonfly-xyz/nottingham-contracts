@@ -423,7 +423,7 @@ contract Game is AssetMarket {
         if (_playerByIdx[fromPlayerIdx] == NULL_PLAYER ||
             _playerByIdx[toPlayerIdx] == NULL_PLAYER)
         {
-            revert AccessError();
+            revert InvalidPlayerError();
         }
         uint256 fromBal = balanceOf[fromPlayerIdx][assetIdx];
         if (fromBal < amount) revert InsufficientBalanceError(fromPlayerIdx, assetIdx);

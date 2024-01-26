@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8;
 
-import { Test } from "forge-std/Test.sol";
+import { Vm, Test } from "forge-std/Test.sol";
 import { LibTestUtils as T } from "./LibTestUtils.sol";
 import {
     Game,
@@ -13,8 +13,10 @@ import {
     GOLD_IDX,
     INVALID_PLAYER_IDX,
     INCOME_AMOUNT,
-    MAX_BUILD_GAS
+    MAX_BUILD_GAS,
+    DEFAULT_BUILDER
 } from "~/Game.sol";
+import { AssetMarket } from "~/Markets.sol";
 import { IPlayer } from "~/IPlayer.sol";
 import { LibBytes } from "~/LibBytes.sol";
 
@@ -24,12 +26,26 @@ enum RevertMode {
     Invalid
 }
 
+using LibBytes for bytes;
+
 event PlayerCreated(address self, uint8 playerIdx, uint8 playerCount);
 event Turning(uint16 round, uint8 playerIdx, uint8 builderIdx);
 event Building(uint16 round, uint8 playerIdx);
 error TestError();
+event TurnState(uint8 playerIdx, uint8 builderIdx, bytes32 h);
+event BuildBlockState(uint8 builderIdx, bytes32 h);
 
-using LibBytes for bytes;
+bytes32 constant TURN_STATE_EVENT_SIGNATURE = keccak256('TurnState(uint8,uint8,bytes32)');
+bytes32 constant BUILD_BLOCK_EVENT_SIGNATURE = keccak256('BuildBlockState(uint8,bytes32)');
+
+function isAddressCold(address addr) view returns (bool isCold) {
+    assembly ("memory-safe") {
+        let g := gas()
+        pop(staticcall(gas(), addr, 0, 0, 0, 0))
+        g := sub(g, gas())
+        isCold := gt(g, 200)
+    }
+}
 
 contract GameTest is Test {
 
@@ -231,9 +247,9 @@ contract GameTest is Test {
     function test_playRound_WinnerBuildsBlock() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
-            type(BuilderPlayer).creationCode
+            type(TestPlayer).creationCode
         ]));
-        BuilderPlayer builder = BuilderPlayer(address(players[1]));
+        TestPlayer builder = TestPlayer(address(players[1]));
         builder.setBid(1337);
         game.setMockBlockAuctionWinner(players[1], 1337);
         vm.expectCall(address(players[0]), abi.encodeCall(IPlayer.buildBlock, ()), 0);
@@ -262,9 +278,9 @@ contract GameTest is Test {
     function test_buildBlock_buildsPlayerBlockIfWinningBidIsNonZero() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
-            type(BuilderPlayer).creationCode
+            type(TestPlayer).creationCode
         ]));
-        BuilderPlayer builder = BuilderPlayer(address(players[1]));
+        TestPlayer builder = TestPlayer(address(players[1]));
         builder.setBid(1);
         game.mintAssetTo(builder, GOLD_IDX, 1);
         vm.expectEmit(true, true, true, true);
@@ -291,29 +307,50 @@ contract GameTest is Test {
         }
     }
 
-    // function test_buildPlayerBlock_cannotIncludePlayerMoreThanOnce() external {}
+    function test_buildBlock_canIncludeRevertingPlayerInDefaultBlock() external {
+        (TestGame game,) = _createGame(T.toDynArray([
+            type(RevertingPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        vm.expectEmit(true, true, true, true);
+        emit Game.DefaultBlockBuilt(0);
+        game.__buildBlock(NULL_PLAYER, 0);
+    }
 
     // This state should be unreachable under normal conditions because the auction
     // process will filter out this activity.
     function test_buildBlock_panicsIfBuilderBidsWithDifferentBidThanAuction() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
-            type(BuilderPlayer).creationCode
+            type(TestPlayer).creationCode
         ]));
-        BuilderPlayer builder = BuilderPlayer(address(players[1]));
+        TestPlayer builder = TestPlayer(address(players[1]));
         builder.setBid(1337);
         vm.expectRevert();
         game.__buildBlock(builder, 1337);
     }
 
+    function test_buildPlayerBlock_cannotIncludePlayerMoreThanOnce() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(DoubleIncludePlayer).creationCode
+        ]));
+        vm.expectRevert(abi.encodeWithSelector(
+            Game.PlayerBuildBlockFailedError.selector,
+            1,
+            abi.encodeWithSelector(Game.PlayerAlreadyIncludedError.selector, 0)
+        ));
+        game.__buildPlayerBlock(players[1]);
+    }
+
     function test_buildPlayerBlock_failsIfBuilderDoesNotIncludeOtherPlayers() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
-            type(BuilderPlayer).creationCode,
+            type(TestPlayer).creationCode,
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode
         ]));
-        BuilderPlayer builder = BuilderPlayer(address(players[1]));
+        TestPlayer builder = TestPlayer(address(players[1]));
         builder.setBid(1337);
         builder.ignorePlayer(players[2]);
         vm.expectRevert(abi.encodeWithSelector(Game.PlayerMissingFromBlockError.selector, 1));
@@ -323,11 +360,11 @@ contract GameTest is Test {
     function test_buildPlayerBlock_builderCanExcludeThemself() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
-            type(BuilderPlayer).creationCode,
+            type(TestPlayer).creationCode,
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode
         ]));
-        BuilderPlayer builder = BuilderPlayer(address(players[1]));
+        TestPlayer builder = TestPlayer(address(players[1]));
         game.mintAssetTo(builder, GOLD_IDX, 1337);
         builder.setBid(1337);
         builder.ignorePlayer(builder);
@@ -337,9 +374,9 @@ contract GameTest is Test {
     function test_buildPlayerBlock_failsIfBuilderRevertsDuringBuild() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
-            type(BuilderPlayer).creationCode
+            type(TestPlayer).creationCode
         ]));
-        BuilderPlayer builder = BuilderPlayer(address(players[1]));
+        TestPlayer builder = TestPlayer(address(players[1]));
         builder.setBid(1337);
         builder.setRevertOnBuild(RevertMode.Revert);
         vm.expectRevert(abi.encodeWithSelector(
@@ -353,9 +390,9 @@ contract GameTest is Test {
     function test_buildPlayerBlock_failsIfBuilderDoesntHaveFundsAtTheEndOfBlock() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
-            type(BuilderPlayer).creationCode
+            type(TestPlayer).creationCode
         ]));
-        BuilderPlayer builder = BuilderPlayer(address(players[1]));
+        TestPlayer builder = TestPlayer(address(players[1]));
         builder.setBid(1337);
         builder.addMintOnTurn(builder, GOLD_IDX, 1336);
         vm.expectRevert(abi.encodeWithSelector(
@@ -369,9 +406,9 @@ contract GameTest is Test {
     function test_buildPlayerBlock_succeedsIfBuilderDoesHaveFundsAtTheEndOfBlock() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
-            type(BuilderPlayer).creationCode
+            type(TestPlayer).creationCode
         ]));
-        BuilderPlayer builder = BuilderPlayer(address(players[1]));
+        TestPlayer builder = TestPlayer(address(players[1]));
         builder.setBid(1337);
         builder.addMintOnTurn(builder, GOLD_IDX, 1338);
         game.__buildPlayerBlock(builder);
@@ -381,9 +418,9 @@ contract GameTest is Test {
     function test_buildPlayerBlock_doesNotConsumeAllGasIfBuilderExplodesDuringBuild() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
-            type(BuilderPlayer).creationCode
+            type(TestPlayer).creationCode
         ]));
-        BuilderPlayer builder = BuilderPlayer(address(players[1]));
+        TestPlayer builder = TestPlayer(address(players[1]));
         builder.setBid(1337);
         builder.setRevertOnBuild(RevertMode.Invalid);
         vm.expectRevert(abi.encodeWithSelector(
@@ -397,15 +434,21 @@ contract GameTest is Test {
         assertApproxEqAbs(gasUsed, MAX_BUILD_GAS, 32e3);
     }
    
-    // function test_buildPlayerBlock_revertingPlayerCountsAsIncluded() external {}
+    function test_buildPlayerBlock_revertingPlayerCountsAsIncluded() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(RevertingPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        game.__buildPlayerBlock(players[1]);
+    }
 
     function test_auctionBlock_returnsHighestBidder() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(BuilderPlayer).creationCode,
-            type(BuilderPlayer).creationCode,
-            type(BuilderPlayer).creationCode
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
         ]));
-        BuilderPlayer[] memory builders;
+        TestPlayer[] memory builders;
         assembly ("memory-safe") { builders := players }
         game.mintAssetTo(builders[0], GOLD_IDX, 100);
         builders[0].setBid(100);
@@ -420,11 +463,11 @@ contract GameTest is Test {
 
     function test_auctionBlock_returnsSecondHighestBidderIfHighestReverts() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(BuilderPlayer).creationCode,
-            type(BuilderPlayer).creationCode,
-            type(BuilderPlayer).creationCode
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
         ]));
-        BuilderPlayer[] memory builders;
+        TestPlayer[] memory builders;
         assembly ("memory-safe") { builders := players }
         game.mintAssetTo(builders[0], GOLD_IDX, 100);
         builders[0].setBid(100);
@@ -440,11 +483,11 @@ contract GameTest is Test {
 
     function test_auctionBlock_returnsZeroIfNoOneBids() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(BuilderPlayer).creationCode,
-            type(BuilderPlayer).creationCode,
-            type(BuilderPlayer).creationCode
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
         ]));
-        BuilderPlayer[] memory builders;
+        TestPlayer[] memory builders;
         assembly ("memory-safe") { builders := players }
         (uint8 builderIdx, uint256 bid) = game.__auctionBlock();
         assertEq(builderIdx, 0);
@@ -453,11 +496,11 @@ contract GameTest is Test {
 
     function test_auctionBlock_returnsZeroIfEveryoneReverts() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(BuilderPlayer).creationCode,
-            type(BuilderPlayer).creationCode,
-            type(BuilderPlayer).creationCode
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
         ]));
-        BuilderPlayer[] memory builders;
+        TestPlayer[] memory builders;
         assembly ("memory-safe") { builders := players }
         builders[0].setRevertOnBuild(RevertMode.Revert);
         builders[1].setRevertOnBuild(RevertMode.Revert);
@@ -467,22 +510,137 @@ contract GameTest is Test {
         assertEq(bid, 0);
     }
 
-    // function test_auctionIgnoresBuilderThatDoesNotIncludeAll() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(BuilderPlayer).creationCode
-    //     ]));
-    //     game.setMockBlockAuctionWinner(players[1], 1337);
-    //     vm.expectCall(address(players[0]), abi.encodeCall(IPlayer.buildBlock, ()), 0);
-    //     vm.expectEmit(true, true, true, true, address(players[1]));
-    //     emit Building(0, INCOME_AMOUNT);
-    //     game.playRound();
-    //     assertEq(game.balanceOf(1, GOLD_IDX), INCOME_AMOUNT - 1337);
-    // }
+    function test_transfer_cannotBeCalledOutsideOfBlock() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(DonatingPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        game.mintAssetTo(players[0], GOLD_IDX, 1337);
+        vm.expectRevert(Game.DuringBlockError.selector);
+        vm.prank(address(players[0]));
+        game.transfer(1, GOLD_IDX, 1);
+    }
 
-    function arbitraryCall(address target, bytes calldata cd) external {
-        (bool s, bytes memory r) = target.call(cd);
-        if (!s) r.rawRevert();
+    function test_transfer_canBeCalledDuringDefaultBlock() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(DonatingPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        game.mintAssetTo(players[0], GOLD_IDX + 1, 1337);
+        vm.expectEmit(true, true, true, true);
+        emit Game.Transfer(0, 1, GOLD_IDX + 1, 1337);
+        vm.expectEmit(true, true, true, true);
+        emit Game.DefaultBlockBuilt(0);
+        game.__buildBlock(NULL_PLAYER, 0);
+    }
+
+    function test_transfer_canBeCalledDuringPlayerBlock() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(DonatingPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        TestPlayer(address(players[1])).setBid(1);
+        game.mintAssetTo(players[0], GOLD_IDX + 1, 1337);
+        game.mintAssetTo(players[1], GOLD_IDX, 1);
+        vm.expectEmit(true, true, true, true);
+        emit Game.Transfer(0, 1, GOLD_IDX + 1, 1337);
+        vm.expectEmit(true, true, true, true);
+        emit Game.PlayerBlockBuilt(0, 1);
+        game.__buildBlock(players[1], 1);
+    }
+
+    function test_transfer_cannotProvideInvalidAsset() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        uint8 assetCount = game.assetCount();
+        game.setCurrentBuilder(DEFAULT_BUILDER);
+        vm.expectRevert(AssetMarket.InvalidAssetError.selector);
+        vm.prank(address(players[0]));
+        game.transfer(1, assetCount, 1);
+    }
+
+    function test_transfer_cannotSendToInvalidPlayer() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        game.setCurrentBuilder(DEFAULT_BUILDER);
+        vm.expectRevert(Game.InvalidPlayerError.selector);
+        vm.prank(address(players[0]));
+        game.transfer(2, GOLD_IDX, 1);
+    }
+
+    function test_transfer_cannotBeCalledByNonPlayer() external {
+        (TestGame game,) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        game.setCurrentBuilder(DEFAULT_BUILDER);
+        vm.expectRevert(Game.InvalidPlayerError.selector);
+        vm.prank(makeAddr('nobody'));
+        game.transfer(2, GOLD_IDX, 1);
+    }
+
+    function test_grantTurn_cannotBeCalledByNonBuilderDuringDefaultBlock() external {
+        (TestGame game,) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(GrantTurnOnTurnPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        vm.expectEmit(true, true, true, true);
+        emit Game.PlayerTurnFailedWarning(1, abi.encodeWithSelector(Game.AccessError.selector));
+        vm.expectEmit(true, true, true, true);
+        emit Game.DefaultBlockBuilt(0);
+        game.__buildBlock(NULL_PLAYER, 0);
+    }
+    
+    function test_grantTurn_succeedsWithWarningIfPlayerFails() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        TestPlayer(address(players[0])).setRevertOnTurn(RevertMode.Revert);
+        game.setCurrentBuilder(players[1]);
+        vm.expectEmit(true, true, true, true);
+        emit Game.PlayerTurnFailedWarning(0, abi.encodeWithSelector(TestError.selector));
+        vm.prank(address(players[1]));
+        game.grantTurn(0);
+    }
+
+    function test_sameStateForPlayersDuringBlockAuctionAndBuilding() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(StateTrackingPlayer).creationCode,
+            type(StateTrackingPlayer).creationCode
+        ]));
+        game.mintAssetTo(players[1], GOLD_IDX, 1);
+        vm.recordLogs();
+        game.__auctionBlock();
+        game.__buildBlock(players[1], 1);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32[2] memory player0TurnStateHashes;
+        bytes32[2] memory player1BuildBlockStateHashes;
+        uint256 player0TurnStateHashesLen;
+        uint256 player1BuildBlockStateHashesLen;
+        for (uint256 i; i < logs.length; ++i) {
+            Vm.Log memory log = logs[i];
+            if (log.topics[0] == BUILD_BLOCK_EVENT_SIGNATURE) {
+                (uint8 playerIdx, bytes32 h) = abi.decode(log.data, (uint8, bytes32));
+                if (playerIdx == 1) {
+                    player1BuildBlockStateHashes[player1BuildBlockStateHashesLen++] = h;
+                }
+            } else if (log.topics[0] == TURN_STATE_EVENT_SIGNATURE) {
+                (uint8 playerIdx, uint8 builderIdx, bytes32 h) = abi.decode(log.data, (uint8, uint8, bytes32));
+                if (playerIdx == 0 && builderIdx == 1) {
+                    player0TurnStateHashes[player0TurnStateHashesLen++] = h;
+                }
+            }
+        }
+        assertEq(player0TurnStateHashesLen, player0TurnStateHashes.length);
+        assertEq(player1BuildBlockStateHashesLen, player1BuildBlockStateHashes.length);
+        assertEq(player0TurnStateHashes[0], player0TurnStateHashes[1]);
+        assertEq(player1BuildBlockStateHashes[0], player1BuildBlockStateHashes[1]);
     }
 
     function _createGame(bytes[] memory playerCreationCodes)
@@ -594,6 +752,11 @@ contract TestGame is Game {
         mockBuilderBid = bid;
     }
 
+    function setCurrentBuilder(IPlayer builder) external {
+        _assertValidPlayer(builder);
+        _builder = builder;
+    }
+
     function __distributeIncome() external virtual {
         _distributeIncome(_getAllPlayers());
     }
@@ -641,7 +804,11 @@ contract TestGame is Game {
     }
 
     function _assertValidPlayer(IPlayer player) private view {
-        assert(_playerByIdx[getIndexFromPlayer(player)] == player);
+        assert(
+            player == NULL_PLAYER
+            || player == DEFAULT_BUILDER
+            || _playerByIdx[getIndexFromPlayer(player)] == player
+        );
     }
 }
 
@@ -655,11 +822,11 @@ contract NoopPlayer is IPlayer {
         emit PlayerCreated(address(this), playerIdx, playerCount);
     }
 
-    function turn(uint8 builderIdx) external virtual {
+    function turn(uint8 builderIdx) public virtual {
         emit Turning(Game(msg.sender).round(), PLAYER_IDX, builderIdx);
     }
 
-    function buildBlock() external virtual returns (uint256) {
+    function buildBlock() public virtual returns (uint256) {
         emit Building(Game(msg.sender).round(), PLAYER_IDX);
         return 0;
     }
@@ -668,7 +835,8 @@ contract NoopPlayer is IPlayer {
 contract DonatingPlayer is NoopPlayer {
     constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
 
-    function turn(uint8) external override {
+    function turn(uint8 builderIdx) public override {
+        NoopPlayer.turn(builderIdx);
         Game game = Game(msg.sender);
         uint8 assetCount = game.assetCount();
         for (uint8 assetIdx = 1; assetIdx < assetCount; ++assetIdx) {
@@ -684,11 +852,60 @@ contract DonatingPlayer is NoopPlayer {
 
 contract RevertingPlayer is NoopPlayer {
     constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
-    function turn(uint8) external override pure { T.throwInvalid(); }
-    function buildBlock() external override pure returns (uint256) { T.throwInvalid(); }
+    function turn(uint8) public override pure { T.throwInvalid(); }
+    function buildBlock() public override pure returns (uint256) { T.throwInvalid(); }
 }
 
-contract BuilderPlayer is NoopPlayer {
+contract DoubleIncludePlayer is NoopPlayer {
+    constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
+    
+    function buildBlock() public override returns (uint256) {
+        NoopPlayer.buildBlock();
+        TestGame game = TestGame(msg.sender);
+        game.grantTurn(0);
+        game.grantTurn(0);
+        return 1;
+    }
+}
+
+contract GrantTurnOnTurnPlayer is NoopPlayer {
+    constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
+    
+    function turn(uint8 builderIdx) public override {
+        NoopPlayer.turn(builderIdx);
+        Game(msg.sender).grantTurn((PLAYER_IDX + 1) % PLAYER_COUNT);
+    }
+}
+
+contract StateTrackingPlayer is NoopPlayer {
+    constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
+
+    function turn(uint8 builderIdx) public override {
+        emit TurnState(PLAYER_IDX, builderIdx, _getStateHash());
+    }
+
+    function buildBlock() public override returns (uint256) {
+        emit BuildBlockState(PLAYER_IDX, _getStateHash());
+        TestGame game = TestGame(msg.sender);
+        for (uint8 i; i < PLAYER_COUNT; ++i) game.grantTurn(i);
+        return 1;
+    }
+
+    function _getStateHash() private view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                msg.data,
+                msg.sender,
+                msg.value,
+                gasleft(),
+                address(this).balance,
+                isAddressCold(address(bytes20(keccak256(abi.encode(address(this), msg.data)))))
+            )
+        );
+    }
+}
+
+contract TestPlayer is NoopPlayer {
     struct AssetOwed {
         IPlayer player;
         uint8 assetIdx;
@@ -703,15 +920,18 @@ contract BuilderPlayer is NoopPlayer {
     IPlayer public ignoredPlayer;
     uint256 public bid;
     RevertMode public revertOnBuild;
+    RevertMode public revertOnTurn;
     AssetOwed[] public mints;
     AssetOwed[] public burns;
     PreparedCall public preparedCall;
 
     constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
 
-    function turn(uint8 builderIdx) external override {
+    function turn(uint8 builderIdx) public override {
+        NoopPlayer.turn(builderIdx);
         TestGame game = TestGame(msg.sender);
-        emit Turning(game.round(), PLAYER_IDX, builderIdx);
+        if (revertOnTurn == RevertMode.Revert) revert TestError();
+        else if (revertOnTurn == RevertMode.Invalid) T.throwInvalid();
         for (uint256 i; i < mints.length; ++i) {
             AssetOwed memory ao = mints[i];
             game.mintAssetTo(ao.player, ao.assetIdx, ao.amount);
@@ -726,11 +946,11 @@ contract BuilderPlayer is NoopPlayer {
         }
     }
 
-    function buildBlock() external override returns (uint256) {
+    function buildBlock() public override returns (uint256) {
+        NoopPlayer.buildBlock();
         TestGame game = TestGame(msg.sender);
         if (revertOnBuild == RevertMode.Revert) revert TestError();
         else if (revertOnBuild == RevertMode.Invalid) T.throwInvalid();
-        emit Building(game.round(), PLAYER_IDX);
         for (uint8 i; i < PLAYER_COUNT; ++i) {
             if (ignoredPlayer != NULL_PLAYER && getIndexFromPlayer(ignoredPlayer) == i) continue;
             game.grantTurn(i);
@@ -756,6 +976,10 @@ contract BuilderPlayer is NoopPlayer {
 
     function setRevertOnBuild(RevertMode mode) external {
         revertOnBuild = mode;
+    }
+
+    function setRevertOnTurn(RevertMode mode) external {
+        revertOnTurn = mode;
     }
 
     function ignorePlayer(IPlayer player) external {
