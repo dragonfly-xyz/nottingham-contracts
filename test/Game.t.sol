@@ -19,6 +19,7 @@ import {
 import { AssetMarket } from "~/Markets.sol";
 import { IPlayer } from "~/IPlayer.sol";
 import { LibBytes } from "~/LibBytes.sol";
+import { SafeCreate2 } from "~/SafeCreate2.sol";
 
 enum RevertMode {
     None,
@@ -48,6 +49,7 @@ function isAddressCold(address addr) view returns (bool isCold) {
 }
 
 contract GameTest is Test {
+    SafeCreate2 sc2 = new SafeCreate2();
 
     function test_deploysPlayersWithArgs() external {
         address gameAddress = _getNextDeployAddress();
@@ -56,13 +58,13 @@ contract GameTest is Test {
         for (uint256 i; i < playerCount; ++i) {
             creationCodes[i] = type(NoopPlayer).creationCode;
         }
-        (uint256[] memory salts, IPlayer[] memory players) = _minePlayers(gameAddress, creationCodes);
+        (uint256[] memory salts, IPlayer[] memory players) = _minePlayers(Game(gameAddress), creationCodes);
         for (uint256 i; i < playerCount; ++i) {
             assertEq(uint160(address(players[i])) & 7, i);
             vm.expectEmit(true, true, true, true);
             emit PlayerCreated(address(players[i]), uint8(i), uint8(playerCount));
         }
-        Game game = new Game(creationCodes, salts);
+        Game game = new Game(sc2, creationCodes, salts);
         assertEq(address(game), gameAddress); 
     }
 
@@ -80,22 +82,22 @@ contract GameTest is Test {
         bytes[] memory creationCodes = new bytes[](1);
         uint256[] memory salts = new uint256[](1);
         vm.expectRevert(abi.encodeWithSelector(Game.GameSetupError.selector, ('# of players')));
-        new Game(creationCodes, salts);
+        new Game(sc2, creationCodes, salts);
     }
 
     function test_cannotDeployGameWithMoreThanEightPlayers() external {
         bytes[] memory creationCodes = new bytes[](9);
         uint256[] memory salts = new uint256[](9);
         vm.expectRevert(abi.encodeWithSelector(Game.GameSetupError.selector, ('# of players')));
-        new Game(creationCodes, salts);
+        new Game(sc2, creationCodes, salts);
     }
 
     function test_cannotDeployGameWithFailingPlayerInitCode() external {
         bytes[] memory creationCodes = new bytes[](2);
         creationCodes[0] = hex'fe';
         uint256[] memory salts = new uint256[](2);
-        vm.expectRevert(LibBytes.Create2FailedError.selector);
-        new Game(creationCodes, salts);
+        vm.expectRevert(abi.encodeWithSelector(Game.CreatePlayerFailedError.selector, 0));
+        new Game(sc2, creationCodes, salts);
     }
     
     function test_canPlayRoundWithRevertingPlayers() external {
@@ -906,45 +908,23 @@ contract GameTest is Test {
         game.sell(fromAsset, toAsset, 101);
     }
 
-    // function test_sell_adjustBalances() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     game.setCurrentBuilder(players[1]);
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     game.mintAssetTo(players[0], fromAsset, 100);
-    //     game.mintAssetTo(players[0], toAsset, 100);
-    //     game.mintAssetTo(players[1], fromAsset, 100);
-    //     game.mintAssetTo(players[1], toAsset, 100);
-    //     uint256 sellAmount = 4;
-    //     vm.prank(address(players[0]));
-    //     uint256 buyAmount = game.sell(fromAsset, toAsset, sellAmount);
-    //     assertEq(game.balanceOf(0, fromAsset), 100 - sellAmount);
-    //     assertEq(game.balanceOf(0, toAsset), 100 + buyAmount);
-    //     assertEq(game.balanceOf(1, fromAsset), 100);
-    //     assertEq(game.balanceOf(1, toAsset), 100);
-    // }
-
     function _createGame(bytes[] memory playerCreationCodes)
         private returns (TestGame game, IPlayer[] memory players)
     {
         uint256[] memory salts;
-        (salts, players) = _minePlayers(_getNextDeployAddress(), playerCreationCodes);
-        game = new TestGame(playerCreationCodes, salts);
+        (salts, players) = _minePlayers(Game(_getNextDeployAddress()), playerCreationCodes);
+        game = new TestGame(sc2, playerCreationCodes, salts);
     }
 
-    function _minePlayers(address deployer, bytes[] memory playerCreationCodes)
+    function _minePlayers(Game game, bytes[] memory playerCreationCodes)
         private view returns (uint256[] memory salts, IPlayer[] memory players)
     {
         salts = new uint256[](playerCreationCodes.length);
         players = new IPlayer[](playerCreationCodes.length);
         for (uint256 i; i < playerCreationCodes.length; ++i) {
             (salts[i], players[i]) = _findPlayerSaltAndAddress(
+                game,
                 playerCreationCodes[i],
-                deployer,
                 uint8(i),
                 uint8(playerCreationCodes.length)
             );
@@ -952,8 +932,8 @@ contract GameTest is Test {
     }
 
     function _findPlayerSaltAndAddress(
+        Game game,
         bytes memory creationCode,
-        address deployer,
         uint8 playerIdx,
         uint8 playerCount
     )
@@ -963,7 +943,8 @@ contract GameTest is Test {
             keccak256(abi.encodePacked(creationCode, abi.encode(playerIdx, playerCount)));
         unchecked {
             for (salt = T.randomUint256(); true; ++salt) {
-                address addr = T.getCreate2Address(initCodeHash, deployer, salt);
+                uint256 create2Salt = uint256(keccak256(abi.encode(salt, game)));
+                address addr = T.getCreate2Address(initCodeHash, address(sc2), create2Salt);
                 if ((uint160(addr) & 7) == playerIdx) {
                     return (salt, IPlayer(addr));
                 }
@@ -1008,8 +989,8 @@ contract TestGame is Game {
     IPlayer public mockBuilder;
     uint256 public mockBuilderBid;
 
-    constructor(bytes[] memory playerCreationCodes, uint256[] memory deploySalts)
-        Game(playerCreationCodes, deploySalts)
+    constructor(SafeCreate2 sc2, bytes[] memory playerCreationCodes, uint256[] memory deploySalts)
+        Game(sc2, playerCreationCodes, deploySalts)
     {}
 
     function mintAssetTo(IPlayer player, uint8 assetIdx, uint256 assetAmount) external {
@@ -1121,7 +1102,7 @@ contract DonatingPlayer is NoopPlayer {
     constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
 
     function turn(uint8 builderIdx) public override {
-        NoopPlayer.turn(builderIdx);
+        super.turn(builderIdx);
         Game game = Game(msg.sender);
         uint8 assetCount = game.assetCount();
         for (uint8 assetIdx = 1; assetIdx < assetCount; ++assetIdx) {
@@ -1145,7 +1126,7 @@ contract DoubleIncludePlayer is NoopPlayer {
     constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
     
     function buildBlock() public override returns (uint256) {
-        NoopPlayer.buildBlock();
+        super.buildBlock();
         TestGame game = TestGame(msg.sender);
         game.grantTurn(0);
         game.grantTurn(0);
@@ -1157,7 +1138,7 @@ contract GrantTurnOnTurnPlayer is NoopPlayer {
     constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
     
     function turn(uint8 builderIdx) public override {
-        NoopPlayer.turn(builderIdx);
+        super.turn(builderIdx);
         Game(msg.sender).grantTurn((PLAYER_IDX + 1) % PLAYER_COUNT);
     }
 }
@@ -1213,7 +1194,7 @@ contract TestPlayer is NoopPlayer {
     constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
 
     function turn(uint8 builderIdx) public override {
-        NoopPlayer.turn(builderIdx);
+        super.turn(builderIdx);
         TestGame game = TestGame(msg.sender);
         if (revertOnTurn == RevertMode.Revert) revert TestError();
         else if (revertOnTurn == RevertMode.Invalid) T.throwInvalid();
@@ -1232,7 +1213,7 @@ contract TestPlayer is NoopPlayer {
     }
 
     function buildBlock() public override returns (uint256) {
-        NoopPlayer.buildBlock();
+        super.buildBlock();
         TestGame game = TestGame(msg.sender);
         if (revertOnBuild == RevertMode.Revert) revert TestError();
         else if (revertOnBuild == RevertMode.Invalid) T.throwInvalid();

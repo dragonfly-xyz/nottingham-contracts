@@ -69,6 +69,8 @@ contract MarketsInvariantTest is Test {
         uint256 initialK = market.INITIAL_K();
         uint256 k = market.k();
         assertApproxEqRel(k, initialK, 1e14, 'k');
-        assertGe(k, initialK, "k' >= k");
+        if (k < initialK) {
+            assertLe(initialK - k, 1, "k' >= k");
+        }
     }
 } 

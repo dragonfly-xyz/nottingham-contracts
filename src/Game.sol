@@ -5,6 +5,7 @@ import { AssetMarket } from './Markets.sol';
 import { LibBytes } from './LibBytes.sol';
 import { LibAddress } from './LibAddress.sol';
 import { IPlayer } from './IPlayer.sol';
+import { SafeCreate2 } from './SafeCreate2.sol';
 
 IPlayer constant NULL_PLAYER = IPlayer(address(0));
 IPlayer constant DEFAULT_BUILDER = IPlayer(address(type(uint160).max));
@@ -17,6 +18,7 @@ uint256 constant MIN_WINNING_ASSET_BALANCE = 100e18;
 uint256 constant MARKET_STARTING_GOLD = 200e18;
 uint256 constant MARKET_STARTING_GOODS = 100e18;
 uint8 constant INVALID_PLAYER_IDX = type(uint8).max;
+uint256 constant MAX_CREATION_GAS = 32e6;
 uint256 constant MAX_TURN_GAS = 32e6;
 uint256 constant MAX_BUILD_GAS = 256e6;
 uint256 constant MAX_RETURN_DATA_SIZE = 8192;
@@ -28,7 +30,7 @@ function getIndexFromPlayer(IPlayer player) pure returns (uint8 playerIdx) {
     return uint8(uint160(address(player)) & PLAYER_ADDRESS_INDEX_MASK);
 }
 
-contract Game is AssetMarket {
+contract Game is AssetMarket, SafeCreate2 {
     using LibBytes for bytes;
     using LibAddress for address;
 
@@ -52,6 +54,7 @@ contract Game is AssetMarket {
     error PlayerBuildBlockFailedError(uint8 builderIdx, bytes revertData);
     error OnlySelfError();
     error PlayerAlreadyIncludedError(uint8 playerIdx);
+    error CreatePlayerFailedError(uint8 playerIdx);
     error BuildPlayerBlockAndRevertSuccess(uint256 bid);
     
     event RoundPlayed(uint16 round);
@@ -86,7 +89,7 @@ contract Game is AssetMarket {
         _;
     }
 
-    constructor(bytes[] memory playerCreationCodes, uint256[] memory deploySalts)
+    constructor(SafeCreate2 sc2, bytes[] memory playerCreationCodes, uint256[] memory deploySalts)
         AssetMarket(uint8(playerCreationCodes.length))
     {
         if (playerCreationCodes.length != deploySalts.length) {
@@ -102,11 +105,18 @@ contract Game is AssetMarket {
             bytes memory initArgs = abi.encode(0, playerCount_);
             for (uint8 i; i < playerCount_; ++i) {
                 assembly ("memory-safe") { mstore(add(initArgs, 0x20), i) }
-                IPlayer player = IPlayer(playerCreationCodes[i].create2(
+
+                IPlayer player;
+                try sc2.safeCreate2{gas: MAX_CREATION_GAS}(
+                    playerCreationCodes[i],
                     deploySalts[i],
                     0,
                     initArgs
-                ));
+                ) returns (address player_) {
+                    player = IPlayer(player_);
+                } catch {
+                    revert CreatePlayerFailedError(i);
+                }
                 // The lowest uint8 of each deployed address should also hold the player index.
                 if (uint160(address(player)) & PLAYER_ADDRESS_INDEX_MASK != i) {
                     revert GameSetupError('player index');
@@ -330,6 +340,7 @@ contract Game is AssetMarket {
         internal returns (bool success, uint256 bid, bytes memory errData)
     {
         bytes memory resultData;
+        // 63/64 rule protects us from call depth discovery.
         (success, resultData) = address(builder).safeCall(
             abi.encodeCall(IPlayer.buildBlock, ()),
             false,
@@ -355,6 +366,7 @@ contract Game is AssetMarket {
 
     function _safeCallTurn(IPlayer player, uint8 builderIdx) internal virtual returns (bool success) {
         bytes memory resultData;
+        // 63/64 rule protects us from call depth discovery.
         (success, resultData) = address(player).safeCall(
             abi.encodeCall(IPlayer.turn, (builderIdx)),
             false, 

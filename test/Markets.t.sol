@@ -68,7 +68,7 @@ contract MarketTest is Test {
         assertGt(sellAmount, 1e16);
         _assertK(m);
     }
-    
+
     function test_canBuyPct(uint16 bps) external {
         TestMarket m = createTestMarket(5);
         uint8 assetCount = m.assetCount();
@@ -142,6 +142,48 @@ contract MarketTest is Test {
             assertApproxEqRel(m.reserve(fromIdx), reserves[fromIdx], 1e14, 'fromReserve (after buy)');
             assertApproxEqRel(m.reserve(toIdx), reserves[toIdx], 1e14, 'toReserve (after buy)');
             _assertK(m);
+        }
+    }
+
+    function testFuzz_quoteBuyAndBuyAreTheSameOutput(uint256 rngSalt, uint16 bps) external {
+        bps = uint16(bound(uint256(bps), 0, 1e4));
+        uint8 assetCount = uint8(bound(rngSalt, 2, 5));
+        uint8 fromAsset = uint8(uint256(keccak256(abi.encode(rngSalt))) % assetCount);
+        uint8 toAsset = uint8((uint256(fromAsset) + 1) % assetCount);
+        TestMarket m = createTestMarket(assetCount);
+        uint256 buyAmount = bps * m.reserve(toAsset) / 1e4;
+        try m.quoteBuy(fromAsset, toAsset, buyAmount) returns (uint256 sellAmount) {
+            uint256 sellAmount_ = m.buy(fromAsset, toAsset, buyAmount);
+            assertEq(sellAmount_, sellAmount);
+        } catch {}
+    }
+
+    function testFuzz_quoteSellAndSellAreTheSameOutput(uint256 rngSalt, uint16 bps) external {
+        bps = uint16(bound(uint256(bps), 0, 1e10));
+        uint8 assetCount = uint8(bound(rngSalt, 2, 5));
+        uint8 fromAsset = uint8(uint256(keccak256(abi.encode(rngSalt))) % assetCount);
+        uint8 toAsset = uint8((uint256(fromAsset) + 1) % assetCount);
+        TestMarket m = createTestMarket(assetCount);
+        uint256 sellAmount = bps * m.reserve(fromAsset) / 1e4;
+        try m.quoteSell(fromAsset, toAsset, sellAmount) returns (uint256 buyAmount) {
+            uint256 buyAmount_ = m.sell(fromAsset, toAsset, sellAmount);
+            assertEq(buyAmount_, buyAmount);
+        } catch {}
+    }
+
+    function test_getRateReturnsOneForSameAssets() external {
+        TestMarket m = createTestMarket(3);
+        for (uint8 i; i < 3; ++i) {
+            assertEq(m.rate(i, i), 1e18);
+        }
+    }
+
+    function test_getRateIsTheRatioOfTwoAssets() external {
+        TestMarket m = createTestMarket(3);
+        for (uint8 fromAsset; fromAsset < 3; ++fromAsset) {
+            for (uint8 toAsset; toAsset < 3; ++toAsset) {
+                assertEq(m.rate(fromAsset, toAsset), m.reserve(toAsset) * 1e18 / m.reserve(fromAsset));
+            }
         }
     }
 
