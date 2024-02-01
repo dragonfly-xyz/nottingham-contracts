@@ -2,7 +2,7 @@
 pragma solidity ^0.8;
 
 import { Vm, Test } from "forge-std/Test.sol";
-import { LibTestUtils as T } from "./LibTestUtils.sol";
+import { LibTestUtils as T } from "../LibTestUtils.sol";
 import {
     Game,
     NULL_PLAYER,
@@ -15,11 +15,11 @@ import {
     INCOME_AMOUNT,
     MAX_BUILD_GAS,
     DEFAULT_BUILDER
-} from "~/Game.sol";
-import { AssetMarket } from "~/Markets.sol";
-import { IPlayer } from "~/IPlayer.sol";
-import { LibBytes } from "~/LibBytes.sol";
-import { SafeCreate2 } from "~/SafeCreate2.sol";
+} from "~/game/Game.sol";
+import { AssetMarket } from "~/game/Markets.sol";
+import { IPlayer } from "~/game/IPlayer.sol";
+import { LibBytes } from "~/game/LibBytes.sol";
+import { SafeCreate2 } from "~/game/SafeCreate2.sol";
 
 enum RevertMode {
     None,

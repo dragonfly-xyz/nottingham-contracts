@@ -4,7 +4,7 @@ import {
     AssetMarket,
     MIN_LIQUIDITY_PER_RESERVE,
     MAX_LIQUIDITY_PER_RESERVE
-} from "~/Markets.sol";
+} from "~/game/Markets.sol";
 
 uint256 constant MIN_PRECISION = 1e4;
 

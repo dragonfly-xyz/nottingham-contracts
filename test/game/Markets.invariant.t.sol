@@ -1,8 +1,8 @@
 pragma solidity ^0.8;
 
 import { Test } from "forge-std/Test.sol";
-import { LibTestUtils as T } from "./LibTestUtils.sol";
-import { AssetMarket } from "~/Markets.sol";
+import { LibTestUtils as T } from "../LibTestUtils.sol";
+import { AssetMarket } from "~/game/Markets.sol";
 import { calcK, clampBuyAmount, clampSellAmount, TestMarket, createTestMarket } from "./MarketTestUtils.sol";
 
 contract MultiMarket is Test {

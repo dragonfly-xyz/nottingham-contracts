@@ -1,8 +1,8 @@
 pragma solidity ^0.8;
 
 import { Test } from "forge-std/Test.sol";
-import { AssetMarket, MIN_LIQUIDITY_PER_RESERVE } from "~/Markets.sol";
-import { LibTestUtils as T } from "./LibTestUtils.sol";
+import { AssetMarket, MIN_LIQUIDITY_PER_RESERVE } from "~/game/Markets.sol";
+import { LibTestUtils as T } from "../LibTestUtils.sol";
 import {
     calcK,
     clampBuyAmount,
