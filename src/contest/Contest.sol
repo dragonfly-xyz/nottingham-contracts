@@ -19,11 +19,17 @@ struct SeasonInfo {
 library LibContest {
     bytes32 constant private REGISTRATION_PREFIX = keccak256(unicode"ᴙɘgiꙅTᴙATioᴎ");
 
-    function hashRegistration(address registrant, uint256 chainId, Confirmation memory confirmation)
+    function hashRegistration(
+        address contest,
+        uint256 chainId,
+        address registrant,
+        Confirmation memory confirmation
+    )
         internal pure returns (bytes32)
     {
         return keccak256(abi.encode(
             REGISTRATION_PREFIX,
+            contest,
             chainId,
             registrant,
             confirmation.expiry,
@@ -126,7 +132,11 @@ contract Contest {
     receive() payable external {}
 
     function _consumeConfirmation(address registrant, Confirmation memory confirmation) private {
-        bytes32 h = LibContest.hashRegistration(registrant, block.chainid, confirmation);
+        bytes32 h = LibContest.hashRegistration(
+            address(this),
+            block.chainid,
+            registrant,confirmation
+        );
         if (confirmationConsumedBlock[h] != 0) revert ConfirmationConsumedError();
         confirmationConsumedBlock[h] = block.number;
         address signer = ecrecover(h, confirmation.v, confirmation.r, confirmation.s);
