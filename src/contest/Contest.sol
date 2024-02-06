@@ -128,6 +128,9 @@ contract Contest {
     function getPlayerCodeHash(uint32 seasonIdx, address player)
         external view returns (bytes32 codeHash)
     {
+        if (playerRegisteredBlock[player] == 0) {
+            return 0;
+        }
         return _seasons[seasonIdx].playerCodeHashes[player];
     }
 
