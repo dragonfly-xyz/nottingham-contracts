@@ -110,6 +110,15 @@ contract GameTest is Test {
         assertEq(winnerIdx, INVALID_PLAYER_IDX);
     }
 
+    function test_canPlayRoundWithEmptyAndRevertingPlayers() external {
+        (Game game,) = _createGame(T.toDynArray([
+            type(EmptyContract).creationCode,
+            hex'fe'
+        ]));
+        uint8 winnerIdx = game.playRound();
+        assertEq(winnerIdx, INVALID_PLAYER_IDX);
+    }
+
     function test_canCompleteGameWithNoopPlayers() external {
         (Game game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
@@ -1253,3 +1262,5 @@ contract TestPlayer is NoopPlayer {
         ignoredPlayer = player;
     }
 }
+
+contract EmptyContract {}
