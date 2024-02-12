@@ -96,6 +96,11 @@ contract Contest {
         if (playerRegisteredBlock[player] != 0) {
             playerRegisteredBlock[player] = block.number;
             --playerCount;
+            SeasonInfo storage season = _seasons[currentSeasonIdx];
+            if (season.playerCodeHashes[player] != 0) {
+                season.playerCodeHashes[player] = 0;
+                --season.playerCodeCount;
+            }
             emit Retired(player);
         }
     }
@@ -111,6 +116,12 @@ contract Contest {
 
     function isSeasonClosed() external view returns (bool) {
         return _isSeasonClosed(_seasons[currentSeasonIdx]);
+    }
+
+    function getSeasonKeys(uint32 seasonIdx)
+        external view returns (bytes32 publicKey, bytes32 privateKey)
+    {
+        return (_seasons[seasonIdx].pubKey, _seasons[seasonIdx].privKey);
     }
 
     function setPlayerCode(uint32 seasonIdx, bytes memory encryptedCode)
@@ -132,6 +143,12 @@ contract Contest {
             return 0;
         }
         return _seasons[seasonIdx].playerCodeHashes[player];
+    }
+
+    function getSeasonPlayerCodeCount(uint32 seasonIdx)
+        external view returns (uint32 playerCount_)
+    {
+        return _seasons[seasonIdx].playerCodeCount;
     }
 
     function getWinner(uint32 seasonIdx)

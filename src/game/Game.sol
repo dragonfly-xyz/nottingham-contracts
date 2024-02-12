@@ -18,7 +18,7 @@ uint256 constant MIN_WINNING_ASSET_BALANCE = 100e18;
 uint256 constant MARKET_STARTING_GOLD = 200e18;
 uint256 constant MARKET_STARTING_GOODS = 100e18;
 uint8 constant INVALID_PLAYER_IDX = type(uint8).max;
-uint256 constant MAX_CREATION_GAS = 32e6;
+uint256 constant MAX_CREATION_GAS = 8e6;
 uint256 constant MAX_TURN_GAS = 32e6;
 uint256 constant MAX_BUILD_GAS = 256e6;
 uint256 constant MAX_RETURN_DATA_SIZE = 8192;
@@ -54,9 +54,9 @@ contract Game is AssetMarket, SafeCreate2 {
     error PlayerBuildBlockFailedError(uint8 builderIdx, bytes revertData);
     error OnlySelfError();
     error PlayerAlreadyIncludedError(uint8 playerIdx);
-    error CreatePlayerFailedError(uint8 playerIdx);
     error BuildPlayerBlockAndRevertSuccess(uint256 bid);
     
+    event CreatePlayerFailed(uint8 playerIdx);
     event RoundPlayed(uint16 round);
     event PlayerTurnFailedWarning(uint8 playerIdx, bytes revertData);
     event GameWon(uint8 indexed playerIdx, uint16 round);
@@ -89,13 +89,18 @@ contract Game is AssetMarket, SafeCreate2 {
         _;
     }
 
-    constructor(SafeCreate2 sc2, bytes[] memory playerCreationCodes, uint256[] memory deploySalts)
+    constructor(
+        address gameMaster,
+        SafeCreate2 sc2,
+        bytes[] memory playerCreationCodes,
+        uint256[] memory deploySalts
+    )
         AssetMarket(uint8(playerCreationCodes.length))
     {
         if (playerCreationCodes.length != deploySalts.length) {
             revert GameSetupError('mismatched arrays');
         }
-        GM = msg.sender;
+        GM = gameMaster;
         uint256 playerCount_ = playerCreationCodes.length;
         if (playerCount_ < 2 || playerCount_ > MAX_PLAYERS) {
             revert GameSetupError('# of players');
@@ -110,12 +115,13 @@ contract Game is AssetMarket, SafeCreate2 {
                 try sc2.safeCreate2{gas: MAX_CREATION_GAS}(
                     playerCreationCodes[i],
                     deploySalts[i],
-                    0,
                     initArgs
                 ) returns (address player_) {
                     player = IPlayer(player_);
                 } catch {
-                    revert CreatePlayerFailedError(i);
+                    // Assign to empty player address.
+                    player = IPlayer(address((255 & (~PLAYER_ADDRESS_INDEX_MASK)) | i));
+                    emit CreatePlayerFailed(i);
                 }
                 // The lowest uint8 of each deployed address should also hold the player index.
                 if (uint160(address(player)) & PLAYER_ADDRESS_INDEX_MASK != i) {

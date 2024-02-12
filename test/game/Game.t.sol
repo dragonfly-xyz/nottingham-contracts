@@ -64,7 +64,7 @@ contract GameTest is Test {
             vm.expectEmit(true, true, true, true);
             emit PlayerCreated(address(players[i]), uint8(i), uint8(playerCount));
         }
-        Game game = new Game(sc2, creationCodes, salts);
+        Game game = new Game(address(this), sc2, creationCodes, salts);
         assertEq(address(game), gameAddress); 
     }
 
@@ -82,22 +82,23 @@ contract GameTest is Test {
         bytes[] memory creationCodes = new bytes[](1);
         uint256[] memory salts = new uint256[](1);
         vm.expectRevert(abi.encodeWithSelector(Game.GameSetupError.selector, ('# of players')));
-        new Game(sc2, creationCodes, salts);
+        new Game(address(this), sc2, creationCodes, salts);
     }
 
     function test_cannotDeployGameWithMoreThanEightPlayers() external {
         bytes[] memory creationCodes = new bytes[](9);
         uint256[] memory salts = new uint256[](9);
         vm.expectRevert(abi.encodeWithSelector(Game.GameSetupError.selector, ('# of players')));
-        new Game(sc2, creationCodes, salts);
+        new Game(address(this), sc2, creationCodes, salts);
     }
 
-    function test_cannotDeployGameWithFailingPlayerInitCode() external {
+    function test_canDeployGameWithFailingPlayerInitCode() external {
         bytes[] memory creationCodes = new bytes[](2);
         creationCodes[0] = hex'fe';
-        uint256[] memory salts = new uint256[](2);
-        vm.expectRevert(abi.encodeWithSelector(Game.CreatePlayerFailedError.selector, 0));
-        new Game(sc2, creationCodes, salts);
+        (uint256[] memory salts, ) = _minePlayers(Game(_getNextDeployAddress()), creationCodes);
+        vm.expectEmit(true, true, true, true);
+        emit Game.CreatePlayerFailed(0);
+        new Game(address(this), sc2, creationCodes, salts);
     }
     
     function test_canPlayRoundWithRevertingPlayers() external {
@@ -990,7 +991,7 @@ contract TestGame is Game {
     uint256 public mockBuilderBid;
 
     constructor(SafeCreate2 sc2, bytes[] memory playerCreationCodes, uint256[] memory deploySalts)
-        Game(sc2, playerCreationCodes, deploySalts)
+        Game(msg.sender, sc2, playerCreationCodes, deploySalts)
     {}
 
     function mintAssetTo(IPlayer player, uint8 assetIdx, uint256 assetAmount) external {
