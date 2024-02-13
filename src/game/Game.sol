@@ -35,8 +35,8 @@ contract Game is AssetMarket, SafeCreate2 {
     using LibAddress for address;
 
     address public immutable GM;
+    uint8 public immutable PLAYER_COUNT;
 
-    uint8 public playerCount;
     uint16 internal _round;
     bool _inRound;
     mapping (uint8 playerIdx => mapping (uint8 assetIdx => uint256 balance)) public balanceOf;
@@ -101,14 +101,14 @@ contract Game is AssetMarket, SafeCreate2 {
             revert GameSetupError('mismatched arrays');
         }
         GM = gameMaster;
-        uint256 playerCount_ = playerCreationCodes.length;
-        if (playerCount_ < 2 || playerCount_ > MAX_PLAYERS) {
+        PLAYER_COUNT = uint8(playerCreationCodes.length);
+        if (PLAYER_COUNT < 2 || PLAYER_COUNT > MAX_PLAYERS) {
             revert GameSetupError('# of players');
         }
-        playerCount = uint8(playerCreationCodes.length);
+        PLAYER_COUNT = uint8(playerCreationCodes.length);
         {
-            bytes memory initArgs = abi.encode(0, playerCount_);
-            for (uint8 i; i < playerCount_; ++i) {
+            bytes memory initArgs = abi.encode(0, PLAYER_COUNT);
+            for (uint8 i; i < PLAYER_COUNT; ++i) {
                 assembly ("memory-safe") { mstore(add(initArgs, 0x20), i) }
 
                 IPlayer player;
@@ -156,7 +156,7 @@ contract Game is AssetMarket, SafeCreate2 {
             _buildBlock(round_, players, builderIdx, builderBid);
         }
         {
-            IPlayer winner = _findWinner(uint8(players.length), round_);
+            IPlayer winner = _findWinner(round_);
             if (winner != NULL_PLAYER) {
                 winnerIdx = getIndexFromPlayer(winner);
                 emit GameWon(winnerIdx, round_);
@@ -173,8 +173,15 @@ contract Game is AssetMarket, SafeCreate2 {
     }
     
     function findWinner() external view returns (uint8 winnerIdx) {
-        IPlayer winner = _findWinner(playerCount, _round);
+        IPlayer winner = _findWinner(_round);
         return winner == NULL_PLAYER ? INVALID_PLAYER_IDX : getIndexFromPlayer(winner);
+    }
+
+    function scorePlayers() external view returns (uint256[] memory scores) {
+        scores = new uint256[](PLAYER_COUNT);
+        for (uint8 playerIdx; playerIdx < scores.length; ++playerIdx) {
+            (, scores[playerIdx]) = _getMaxNonGoldAssetForPlayer(playerIdx);
+        }
     }
 
     function transfer(uint8 toPlayerIdx, uint8 assetIdx, uint256 amount) public duringBlock {
@@ -270,22 +277,19 @@ contract Game is AssetMarket, SafeCreate2 {
         return _round >= MAX_ROUNDS;
     }
 
-    function _findWinner(uint8 playerCount_, uint16 round_)
+    function _findWinner(uint16 round_)
         internal virtual view returns (IPlayer winner)
     {
         // Find which player has the maximum balance of any asset that isn't gold.
-        uint8 nAssets = ASSET_COUNT;
         uint8 maxBalancePlayerIdx;
         uint8 maxBalanceAssetIdx;
         uint256 maxBalance;
-        for (uint8 playerIdx; playerIdx < playerCount_; ++playerIdx) {
-            for (uint8 assetIdx = GOLD_IDX + 1; assetIdx < nAssets; ++assetIdx) {
-                uint256 bal = balanceOf[playerIdx][assetIdx];
-                if (bal > maxBalance) {
-                    maxBalancePlayerIdx = playerIdx;
-                    maxBalanceAssetIdx = assetIdx;
-                    maxBalance = bal;
-                }
+        for (uint8 playerIdx; playerIdx < PLAYER_COUNT; ++playerIdx) {
+           (uint8 assetIdx, uint256 assetBalance) = _getMaxNonGoldAssetForPlayer(playerIdx);
+            if (assetBalance > maxBalance) {
+                maxBalancePlayerIdx = playerIdx;
+                maxBalanceAssetIdx = assetIdx;
+                maxBalance = assetBalance;
             }
         }
         if (round_ < MAX_ROUNDS) {
@@ -299,6 +303,19 @@ contract Game is AssetMarket, SafeCreate2 {
         // After max rounds, whomever has the highest balance wins.
         if (maxBalanceAssetIdx == 0) return NULL_PLAYER;
         return _playerByIdx[maxBalancePlayerIdx];
+    }
+
+    function _getMaxNonGoldAssetForPlayer(uint8 playerIdx)
+        internal view returns (uint8 assetIdx, uint256 balance)
+    {
+        uint8 nAssets = ASSET_COUNT;
+        for (assetIdx = GOLD_IDX + 1; assetIdx < nAssets; ++assetIdx) {
+            uint256 bal = balanceOf[playerIdx][assetIdx];
+            if (bal > balance) {
+                assetIdx = assetIdx;
+                balance = bal;
+            }
+        }
     }
 
     function _simulateBuildPlayerBlock(IPlayer[] memory players, uint8 builderIdx)
@@ -428,7 +445,7 @@ contract Game is AssetMarket, SafeCreate2 {
     }
 
     function _getAllPlayers() internal view returns (IPlayer[] memory players) {
-        uint8 n = playerCount;
+        uint8 n = PLAYER_COUNT;
         players = new IPlayer[](n);
         for (uint8 i; i < n; ++i) {
             players[i] = _playerByIdx[i];

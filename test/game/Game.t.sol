@@ -1070,13 +1070,13 @@ contract TestGame is Game {
         return Game._auctionBlock(players);
     }
 
-    function _findWinner(uint8 playerCount_, uint16 round_)
+    function _findWinner(uint16 round_)
         internal override view returns (IPlayer winner)
     {
         if (mockWinner != NULL_PLAYER) {
             return mockWinner;
         }
-        return Game._findWinner(playerCount_, round_);
+        return Game._findWinner(round_);
     }
 
     function _assertValidPlayer(IPlayer player) private view {
