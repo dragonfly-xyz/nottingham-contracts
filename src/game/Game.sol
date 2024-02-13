@@ -144,7 +144,7 @@ contract Game is AssetMarket, SafeCreate2 {
         }
     }
 
-    function playRound() external onlyGameMaster returns (uint8 winnerIdx) {
+    function playRound() external onlyGameMaster returns (bool isGameOver_, uint8 winnerIdx) {
         if (_inRound) revert AccessError();
         _inRound = true;
         uint16 round_ = _round;
@@ -170,6 +170,7 @@ contract Game is AssetMarket, SafeCreate2 {
             }
         }
         _inRound = false;
+        isGameOver_ = round_ >= MAX_ROUNDS;
     }
     
     function findWinner() external view returns (uint8 winnerIdx) {

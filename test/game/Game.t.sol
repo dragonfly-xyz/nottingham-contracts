@@ -106,7 +106,8 @@ contract GameTest is Test {
             type(RevertingPlayer).creationCode,
             type(RevertingPlayer).creationCode
         ]));
-        uint8 winnerIdx = game.playRound();
+        (bool isGameOver, uint8 winnerIdx) = game.playRound();
+        assertFalse(isGameOver);
         assertEq(winnerIdx, INVALID_PLAYER_IDX);
     }
 
@@ -115,7 +116,8 @@ contract GameTest is Test {
             type(EmptyContract).creationCode,
             hex'fe'
         ]));
-        uint8 winnerIdx = game.playRound();
+        (bool isGameOver, uint8 winnerIdx) = game.playRound();
+        assertFalse(isGameOver);
         assertEq(winnerIdx, INVALID_PLAYER_IDX);
     }
 
@@ -126,8 +128,9 @@ contract GameTest is Test {
         ]));
         uint8 winnerIdx;
         while (true) {
-            winnerIdx = game.playRound();
-            if (winnerIdx != INVALID_PLAYER_IDX) break;
+            bool isGameOver;
+            (isGameOver, winnerIdx) = game.playRound();
+            if (isGameOver) break;
         }
         assertEq(winnerIdx, 0);
         (uint8 assetIdx, uint256 bal) = _getMaxNonGoldAssetBalance(game, winnerIdx);
@@ -143,8 +146,9 @@ contract GameTest is Test {
         ]));
         uint8 winnerIdx;
         while (true) {
-            winnerIdx = game.playRound();
-            if (winnerIdx != INVALID_PLAYER_IDX) break;
+            bool isGameOver;
+            (isGameOver, winnerIdx) = game.playRound();
+            if (isGameOver) break;
         }
         assertEq(winnerIdx, 1);
         (uint8 assetIdx, uint256 bal) = _getMaxNonGoldAssetBalance(game, winnerIdx);
@@ -161,8 +165,9 @@ contract GameTest is Test {
         ]));
         uint8 winnerIdx;
         while (true) {
-            winnerIdx = game.playRound();
-            if (winnerIdx != INVALID_PLAYER_IDX) break;
+            bool isGameOver;
+            (isGameOver, winnerIdx) = game.playRound();
+            if (isGameOver) break;
         }
         assertEq(winnerIdx, 0);
         (uint8 assetIdx, uint256 bal) = _getMaxNonGoldAssetBalance(game, winnerIdx);
@@ -179,7 +184,8 @@ contract GameTest is Test {
             type(NoopPlayer).creationCode
         ]));
         game.setMockWinner(players[1]);
-        uint8 winnerIdx = game.playRound();
+        (bool isGameOver, uint8 winnerIdx) = game.playRound();
+        assertTrue(isGameOver);
         assertEq(winnerIdx, 1);
         assertTrue(game.isGameOver());
     }
