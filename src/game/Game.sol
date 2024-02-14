@@ -59,7 +59,6 @@ contract Game is AssetMarket, SafeCreate2 {
     event CreatePlayerFailed(uint8 playerIdx);
     event RoundPlayed(uint16 round);
     event PlayerTurnFailedWarning(uint8 playerIdx, bytes revertData);
-    event GameWon(uint8 indexed playerIdx, uint16 round);
     event Mint(uint8 indexed playerIdx, uint8 indexed assetIdx, uint256 assetAmount);
     event Burn(uint8 indexed playerIdx, uint8 indexed assetIdx, uint256 assetAmount);
     event Transfer(uint8 indexed fromPlayerIdx, uint8 indexed  toPlayerIdx, uint8 indexed assetIdx, uint256 assetAmount);
@@ -68,6 +67,7 @@ contract Game is AssetMarket, SafeCreate2 {
     event DefaultBlockBuilt(uint16 round);
     event BuildPlayerBlockFailedWarning(bytes data);
     event Swap(uint8 playerIdx, uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount, uint256 toAmount);
+    event GameOver(uint16 rounds, uint8 winnerIdx); 
 
     modifier onlyGameMaster() {
         if (msg.sender != GM) revert AccessError();
@@ -159,7 +159,6 @@ contract Game is AssetMarket, SafeCreate2 {
             IPlayer winner = _findWinner(round_);
             if (winner != NULL_PLAYER) {
                 winnerIdx = getIndexFromPlayer(winner);
-                emit GameWon(winnerIdx, round_);
                 // Invert the round counter to end the game early.
                 _round = (round_ = ~round_);
                 assert(round_ >= MAX_ROUNDS);
@@ -171,6 +170,9 @@ contract Game is AssetMarket, SafeCreate2 {
         }
         _inRound = false;
         isGameOver_ = round_ >= MAX_ROUNDS;
+        if (isGameOver_) {
+            emit GameOver(_getTrueRoundCount(round_), winnerIdx);
+        }
     }
     
     function findWinner() external view returns (uint8 winnerIdx) {
@@ -264,10 +266,7 @@ contract Game is AssetMarket, SafeCreate2 {
     }
 
     function round() public view returns (uint16 round_) {
-        round_ = _round;
-        if (round_ & 0x8000 != 0) {
-            round_ = ~round_;
-        }
+        return _getTrueRoundCount(_round);
     }
 
     function assetCount() external view returns (uint8) {
@@ -400,6 +399,10 @@ contract Game is AssetMarket, SafeCreate2 {
         if (!success) {
             emit PlayerTurnFailedWarning(getIndexFromPlayer(player), resultData);
         }
+    }
+
+    function _getTrueRoundCount(uint16 rawRound) private pure returns (uint16 round_) {
+        return rawRound & 0x8000 != 0 ? ~rawRound : rawRound;
     }
 
     function _getValidPlayerIdx(IPlayer player) private view returns (uint8 playerIdx) {
