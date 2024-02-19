@@ -13,15 +13,15 @@ uint160 constant PLAYER_ADDRESS_INDEX_MASK = 7;
 uint8 constant GOLD_IDX = 0;
 // Bounded by size of `_isPlayerIncludedInRoundBitmap` and address suffix.
 uint256 constant MAX_PLAYERS = 8;
-uint8 constant MAX_ROUNDS = 101;
-uint256 constant MIN_WINNING_ASSET_BALANCE = 100e18;
+uint8 constant MAX_ROUNDS = 32;
+uint256 constant MIN_WINNING_ASSET_BALANCE = 32e18;
 uint256 constant MARKET_STARTING_GOLD = 200e18;
 uint256 constant MARKET_STARTING_GOODS = 100e18;
 uint8 constant INVALID_PLAYER_IDX = type(uint8).max;
 uint256 constant MAX_CREATION_GAS = 8e6;
-uint256 constant MAX_TURN_GAS = 32e6;
-uint256 constant MAX_BUILD_GAS = 256e6;
-uint256 constant MAX_RETURN_DATA_SIZE = 8192;
+uint256 constant MAX_TURN_GAS = 8e6;
+uint256 constant MAX_BUILD_GAS = 96e6;
+uint256 constant MAX_RETURN_DATA_SIZE = 4096;
 uint256 constant INCOME_AMOUNT = 1e18;
 
 function getIndexFromPlayer(IPlayer player) pure returns (uint8 playerIdx) {
@@ -30,7 +30,7 @@ function getIndexFromPlayer(IPlayer player) pure returns (uint8 playerIdx) {
     return uint8(uint160(address(player)) & PLAYER_ADDRESS_INDEX_MASK);
 }
 
-contract Game is AssetMarket, SafeCreate2 {
+contract Game is AssetMarket {
     using LibBytes for bytes;
     using LibAddress for address;
 
@@ -155,6 +155,7 @@ contract Game is AssetMarket, SafeCreate2 {
             (uint8 builderIdx, uint256 builderBid) = _auctionBlock(players);
             _buildBlock(round_, players, builderIdx, builderBid);
         }
+        emit RoundPlayed(round_);
         {
             IPlayer winner = _findWinner(round_);
             if (winner != NULL_PLAYER) {
@@ -163,7 +164,6 @@ contract Game is AssetMarket, SafeCreate2 {
                 _round = (round_ = ~round_);
                 assert(round_ >= MAX_ROUNDS);
             } else {
-                emit RoundPlayed(round_);
                 winnerIdx = INVALID_PLAYER_IDX;
                 _round = ++round_;
             }

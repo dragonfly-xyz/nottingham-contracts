@@ -51,6 +51,7 @@ contract Contest {
     error InvalidKeyError();
     error NotWinnerError();
     error AlreadyClaimedError();
+    error PlayerCodeSizeError();
 
     event Registered(address indexed player);
     event Retired(address indexed player);
@@ -58,7 +59,9 @@ contract Contest {
     event WinnerDeclared(uint32 indexed season, address indexed winner, uint256 prize);
     event SeasonStarted(uint32 indexed season, bytes32 publicKey);
     event PrizeClaimed(uint32 indexed season, address indexed winner, uint256 prize);
-    event CodeCommitted(uint32 indexed season, address indexed player, bytes encryptedCode);
+    event CodeCommitted(uint32 indexed season, address indexed player, bytes32 codeHash, bytes encryptedCode);
+
+    uint256 MAX_CODE_SIZE = 0x8000;
 
     address public immutable HOST;
     address public immutable ADMIN;
@@ -124,16 +127,19 @@ contract Contest {
         return (_seasons[seasonIdx].pubKey, _seasons[seasonIdx].privKey);
     }
 
-    function setPlayerCode(uint32 seasonIdx, bytes memory encryptedCode)
+    function setPlayerCode(uint32 seasonIdx, bytes32 codeHash, bytes calldata encryptedCode)
         external
         onlyRegisteredPlayer
         duringSameSeason(seasonIdx)
     {
+        if (encryptedCode.length > MAX_CODE_SIZE) {
+            revert PlayerCodeSizeError();
+        }
         SeasonInfo storage season = _seasons[seasonIdx];
         if (_isSeasonClosed(season)) revert SeasonClosedError();
         if (season.playerCodeHashes[msg.sender] == 0) ++season.playerCodeCount;
-        season.playerCodeHashes[msg.sender] = keccak256(encryptedCode);
-        emit CodeCommitted(seasonIdx, msg.sender, encryptedCode);
+        season.playerCodeHashes[msg.sender] = codeHash;
+        emit CodeCommitted(seasonIdx, msg.sender, codeHash, encryptedCode);
     }
 
     function getPlayerCodeHash(uint32 seasonIdx, address player)
