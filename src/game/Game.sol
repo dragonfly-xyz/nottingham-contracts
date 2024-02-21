@@ -18,10 +18,10 @@ uint256 constant MIN_WINNING_ASSET_BALANCE = 32e18;
 uint256 constant MARKET_STARTING_GOLD = 200e18;
 uint256 constant MARKET_STARTING_GOODS = 100e18;
 uint8 constant INVALID_PLAYER_IDX = type(uint8).max;
-uint256 constant MAX_CREATION_GAS = 8e6;
-uint256 constant MAX_TURN_GAS = 8e6;
-uint256 constant MAX_BUILD_GAS = 96e6;
-uint256 constant MAX_RETURN_DATA_SIZE = 4096;
+uint256 constant MAX_CREATION_GAS = 4e6;
+uint256 constant MAX_TURN_GAS = 4e6;
+uint256 constant MAX_BUILD_GAS = 64e6;
+uint256 constant MAX_RETURN_DATA_SIZE = 1024;
 uint256 constant INCOME_AMOUNT = 1e18;
 
 function getIndexFromPlayer(IPlayer player) pure returns (uint8 playerIdx) {
@@ -55,13 +55,13 @@ contract Game is AssetMarket {
     error OnlySelfError();
     error PlayerAlreadyIncludedError(uint8 playerIdx);
     error BuildPlayerBlockAndRevertSuccess(uint256 bid);
+    error MinGasError();
     
     event CreatePlayerFailed(uint8 playerIdx);
     event RoundPlayed(uint16 round);
     event PlayerTurnFailedWarning(uint8 playerIdx, bytes revertData);
     event Mint(uint8 indexed playerIdx, uint8 indexed assetIdx, uint256 assetAmount);
     event Burn(uint8 indexed playerIdx, uint8 indexed assetIdx, uint256 assetAmount);
-    event Transfer(uint8 indexed fromPlayerIdx, uint8 indexed  toPlayerIdx, uint8 indexed assetIdx, uint256 assetAmount);
     event BlockBid(uint8 indexed playerIdx, uint256 bid);
     event PlayerBlockBuilt(uint16 round, uint8 indexed builderIdx);
     event DefaultBlockBuilt(uint16 round);
@@ -86,6 +86,11 @@ contract Game is AssetMarket {
 
     modifier duringBlock() {
         if (_builder == NULL_PLAYER) revert DuringBlockError();
+        _;
+    }
+   
+    modifier minGas(uint256 min) {
+        if (gasleft() < min) revert MinGasError();
         _;
     }
 
@@ -187,12 +192,12 @@ contract Game is AssetMarket {
         }
     }
 
-    function transfer(uint8 toPlayerIdx, uint8 assetIdx, uint256 amount) public duringBlock {
-        uint8 fromPlayerIdx = getIndexFromPlayer(IPlayer(msg.sender));
-        _transfer(fromPlayerIdx, toPlayerIdx, assetIdx, amount);
-    }
-
-    function grantTurn(uint8 playerIdx) external onlyBuilder returns (bool success) {
+    function grantTurn(uint8 playerIdx) 
+        external
+        minGas(MAX_TURN_GAS + 5e3)
+        onlyBuilder
+        returns (bool success)
+    {
         IPlayer player = _playerByIdx[playerIdx];
         if (player == NULL_PLAYER) revert InvalidPlayerError();
         {
@@ -431,6 +436,7 @@ contract Game is AssetMarket {
     ) internal {
         if (builderBid != 0) {
             assert(_buildPlayerBlock(players, builderIdx) == builderBid);
+            // TODO: Donate bid to market?
             emit PlayerBlockBuilt(round_, builderIdx);
         } else {
             _buildDefaultBlock(players, round_);
@@ -454,23 +460,6 @@ contract Game is AssetMarket {
         for (uint8 i; i < n; ++i) {
             players[i] = _playerByIdx[i];
         }
-    }
-
-    function _transfer(uint8 fromPlayerIdx, uint8 toPlayerIdx, uint8 assetIdx, uint256 amount) internal {
-        _assertValidAsset(assetIdx);
-        // Sender and receiver must be players.
-        if (_playerByIdx[fromPlayerIdx] == NULL_PLAYER ||
-            _playerByIdx[toPlayerIdx] == NULL_PLAYER)
-        {
-            revert InvalidPlayerError();
-        }
-        uint256 fromBal = balanceOf[fromPlayerIdx][assetIdx];
-        if (fromBal < amount) revert InsufficientBalanceError(fromPlayerIdx, assetIdx);
-        unchecked {
-            balanceOf[fromPlayerIdx][assetIdx] = fromBal - amount;
-            balanceOf[toPlayerIdx][assetIdx] += amount;
-        }
-        emit Transfer(fromPlayerIdx, toPlayerIdx, assetIdx, amount);
     }
 
     function _mintAssetTo(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) internal {

@@ -139,25 +139,6 @@ contract GameTest is Test {
         assertTrue(game.isGameOver());
     }
 
-    function test_canCompleteGameWithDonatingPlayer() external {
-        (Game game,) = _createGame(T.toDynArray([
-            type(DonatingPlayer).creationCode,
-            type(NoopPlayer).creationCode
-        ]));
-        uint8 winnerIdx;
-        while (true) {
-            bool isGameOver;
-            (isGameOver, winnerIdx) = game.playRound();
-            if (isGameOver) break;
-        }
-        assertEq(winnerIdx, 1);
-        (uint8 assetIdx, uint256 bal) = _getMaxNonGoldAssetBalance(game, winnerIdx);
-        assertEq(assetIdx, GOLD_IDX + 1);
-        assertGe(bal, MIN_WINNING_ASSET_BALANCE);
-        assertEq(game.round(), MAX_ROUNDS / 2 - 1);
-        assertTrue(game.isGameOver());
-    }
-
     function test_cannotPlayAnotherRoundAfterWinnerDeclared() external {
         (Game game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
@@ -528,110 +509,6 @@ contract GameTest is Test {
         assertEq(bid, 0);
     }
 
-    function test_transfer_cannotBeCalledOutsideOfBlock() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(DonatingPlayer).creationCode,
-            type(TestPlayer).creationCode
-        ]));
-        game.mintAssetTo(players[0], GOLD_IDX, 1337);
-        vm.expectRevert(Game.DuringBlockError.selector);
-        vm.prank(address(players[0]));
-        game.transfer(1, GOLD_IDX, 1);
-    }
-
-    function test_transfer_canBeCalledDuringDefaultBlock() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(DonatingPlayer).creationCode,
-            type(TestPlayer).creationCode
-        ]));
-        game.mintAssetTo(players[0], GOLD_IDX + 1, 1337);
-        vm.expectEmit(true, true, true, true);
-        emit Game.Transfer(0, 1, GOLD_IDX + 1, 1337);
-        vm.expectEmit(true, true, true, true);
-        emit Game.DefaultBlockBuilt(0);
-        game.__buildBlock(NULL_PLAYER, 0);
-    }
-
-    function test_transfer_canBeCalledDuringPlayerBlock() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(DonatingPlayer).creationCode,
-            type(TestPlayer).creationCode
-        ]));
-        TestPlayer(address(players[1])).setBid(1);
-        game.mintAssetTo(players[0], GOLD_IDX + 1, 1337);
-        game.mintAssetTo(players[1], GOLD_IDX, 1);
-        vm.expectEmit(true, true, true, true);
-        emit Game.Transfer(0, 1, GOLD_IDX + 1, 1337);
-        vm.expectEmit(true, true, true, true);
-        emit Game.PlayerBlockBuilt(0, 1);
-        game.__buildBlock(players[1], 1);
-    }
-
-    function test_transfer_cannotProvideInvalidAsset() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(NoopPlayer).creationCode,
-            type(NoopPlayer).creationCode
-        ]));
-        uint8 assetCount = game.assetCount();
-        game.setCurrentBuilder(DEFAULT_BUILDER);
-        vm.expectRevert(AssetMarket.InvalidAssetError.selector);
-        vm.prank(address(players[0]));
-        game.transfer(1, assetCount, 1);
-    }
-
-    function test_transfer_cannotSendToInvalidPlayer() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(NoopPlayer).creationCode,
-            type(NoopPlayer).creationCode
-        ]));
-        game.setCurrentBuilder(DEFAULT_BUILDER);
-        vm.expectRevert(Game.InvalidPlayerError.selector);
-        vm.prank(address(players[0]));
-        game.transfer(2, GOLD_IDX, 1);
-    }
-
-    function test_transfer_cannotBeCalledByNonPlayer() external {
-        (TestGame game,) = _createGame(T.toDynArray([
-            type(NoopPlayer).creationCode,
-            type(NoopPlayer).creationCode
-        ]));
-        game.setCurrentBuilder(DEFAULT_BUILDER);
-        vm.expectRevert(Game.InvalidPlayerError.selector);
-        vm.prank(makeAddr('nobody'));
-        game.transfer(2, GOLD_IDX, 1);
-    }
-
-    function test_transfer_adjustsBalances() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(NoopPlayer).creationCode,
-            type(NoopPlayer).creationCode
-        ]));
-        game.setCurrentBuilder(DEFAULT_BUILDER);
-        uint8 assetCount = game.assetCount();
-        uint8 asset = uint8((assetCount + T.randomUint256()) % assetCount);
-        game.mintAssetTo(players[0], asset, 100);
-        game.mintAssetTo(players[1], asset, 100);
-        vm.prank(address(players[0]));
-        game.transfer(1, asset, 33);
-        assertEq(game.balanceOf(0, asset), 67);
-        assertEq(game.balanceOf(1, asset), 133);
-    }
-
-    function test_transfer_cannotTransferMoreThanBalance() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(NoopPlayer).creationCode,
-            type(NoopPlayer).creationCode
-        ]));
-        game.setCurrentBuilder(DEFAULT_BUILDER);
-        uint8 assetCount = game.assetCount();
-        uint8 asset = uint8((assetCount + T.randomUint256()) % assetCount);
-        game.mintAssetTo(players[0], asset, 100);
-        game.mintAssetTo(players[1], asset, 100);
-        vm.expectRevert(abi.encodeWithSelector(Game.InsufficientBalanceError.selector, 0, asset));
-        vm.prank(address(players[0]));
-        game.transfer(1, asset, 101);
-    }
-
     function test_grantTurn_cannotBeCalledByNonBuilderDuringDefaultBlock() external {
         (TestGame game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
@@ -639,7 +516,10 @@ contract GameTest is Test {
             type(NoopPlayer).creationCode
         ]));
         vm.expectEmit(true, true, true, true);
-        emit Game.PlayerTurnFailedWarning(1, abi.encodeWithSelector(Game.AccessError.selector));
+        // This will actually trigger a MinGasError because the turn gas lower than what
+        // grantTurn() requires.
+        // emit Game.PlayerTurnFailedWarning(1, abi.encodeWithSelector(Game.AccessError.selector));
+        emit Game.PlayerTurnFailedWarning(1, abi.encodeWithSelector(Game.MinGasError.selector));
         vm.expectEmit(true, true, true, true);
         emit Game.DefaultBlockBuilt(0);
         game.__buildBlock(NULL_PLAYER, 0);
@@ -1111,24 +991,6 @@ contract NoopPlayer is IPlayer {
     function buildBlock() public virtual returns (uint256) {
         emit Building(Game(msg.sender).round(), PLAYER_IDX);
         return 0;
-    }
-}
-
-contract DonatingPlayer is NoopPlayer {
-    constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
-
-    function turn(uint8 builderIdx) public override {
-        super.turn(builderIdx);
-        Game game = Game(msg.sender);
-        uint8 assetCount = game.assetCount();
-        for (uint8 assetIdx = 1; assetIdx < assetCount; ++assetIdx) {
-            // Always donate to last player.
-            game.transfer(
-                PLAYER_COUNT - 1,
-                assetIdx,
-                game.balanceOf(PLAYER_IDX, assetIdx)
-            );
-        }
     }
 }
 
