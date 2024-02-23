@@ -11,6 +11,7 @@ IPlayer constant NULL_PLAYER = IPlayer(address(0));
 IPlayer constant DEFAULT_BUILDER = IPlayer(address(type(uint160).max));
 uint160 constant PLAYER_ADDRESS_INDEX_MASK = 7;
 uint8 constant GOLD_IDX = 0;
+uint256 constant MIN_PLAYERS = 2;
 // Bounded by size of `_isPlayerIncludedInRoundBitmap` and address suffix.
 uint256 constant MAX_PLAYERS = 8;
 uint8 constant MAX_ROUNDS = 32;
@@ -59,7 +60,8 @@ contract Game is AssetMarket {
     
     event CreatePlayerFailed(uint8 playerIdx);
     event RoundPlayed(uint16 round);
-    event PlayerTurnFailedWarning(uint8 playerIdx, bytes revertData);
+    event PlayerTurnFailed(uint8 playerIdx, bytes revertData);
+    event PlayerTurnSuccess(uint8 playerIdx);
     event Mint(uint8 indexed playerIdx, uint8 indexed assetIdx, uint256 assetAmount);
     event Burn(uint8 indexed playerIdx, uint8 indexed assetIdx, uint256 assetAmount);
     event BlockBid(uint8 indexed playerIdx, uint256 bid);
@@ -107,7 +109,7 @@ contract Game is AssetMarket {
         }
         GM = gameMaster;
         PLAYER_COUNT = uint8(playerCreationCodes.length);
-        if (PLAYER_COUNT < 2 || PLAYER_COUNT > MAX_PLAYERS) {
+        if (PLAYER_COUNT < MIN_PLAYERS || PLAYER_COUNT > MAX_PLAYERS) {
             revert GameSetupError('# of players');
         }
         PLAYER_COUNT = uint8(playerCreationCodes.length);
@@ -149,7 +151,7 @@ contract Game is AssetMarket {
         }
     }
 
-    function playRound() external onlyGameMaster returns (bool isGameOver_, uint8 winnerIdx) {
+    function playRound() external onlyGameMaster returns (uint8 winnerIdx) {
         if (_inRound) revert AccessError();
         _inRound = true;
         uint16 round_ = _round;
@@ -166,7 +168,7 @@ contract Game is AssetMarket {
             if (winner != NULL_PLAYER) {
                 winnerIdx = getIndexFromPlayer(winner);
                 // Invert the round counter to end the game early.
-                _round = (round_ = ~round_);
+                _round = (round_ = ~(++round_));
                 assert(round_ >= MAX_ROUNDS);
             } else {
                 winnerIdx = INVALID_PLAYER_IDX;
@@ -174,8 +176,7 @@ contract Game is AssetMarket {
             }
         }
         _inRound = false;
-        isGameOver_ = round_ >= MAX_ROUNDS;
-        if (isGameOver_) {
+        if (winnerIdx != INVALID_PLAYER_IDX) {
             emit GameOver(_getTrueRoundCount(round_), winnerIdx);
         }
     }
@@ -305,8 +306,6 @@ contract Game is AssetMarket {
             }
             return NULL_PLAYER;
         }
-        // After max rounds, whomever has the highest balance wins.
-        if (maxBalanceAssetIdx == 0) return NULL_PLAYER;
         return _playerByIdx[maxBalancePlayerIdx];
     }
 
@@ -402,7 +401,9 @@ contract Game is AssetMarket {
             MAX_RETURN_DATA_SIZE
         );
         if (!success) {
-            emit PlayerTurnFailedWarning(getIndexFromPlayer(player), resultData);
+            emit PlayerTurnFailed(getIndexFromPlayer(player), resultData);
+        } else {
+            emit PlayerTurnSuccess(getIndexFromPlayer(player));
         }
     }
 

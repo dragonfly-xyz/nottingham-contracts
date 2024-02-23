@@ -19,6 +19,7 @@ import {
 import { AssetMarket } from "~/game/Markets.sol";
 import { IPlayer } from "~/game/IPlayer.sol";
 import { LibBytes } from "~/game/LibBytes.sol";
+import { LibMatchUtils } from "~/game/LibMatchUtils.sol";
 import { SafeCreate2 } from "~/game/SafeCreate2.sol";
 
 enum RevertMode {
@@ -106,8 +107,7 @@ contract GameTest is Test {
             type(RevertingPlayer).creationCode,
             type(RevertingPlayer).creationCode
         ]));
-        (bool isGameOver, uint8 winnerIdx) = game.playRound();
-        assertFalse(isGameOver);
+        uint8 winnerIdx = game.playRound();
         assertEq(winnerIdx, INVALID_PLAYER_IDX);
     }
 
@@ -116,8 +116,7 @@ contract GameTest is Test {
             type(EmptyContract).creationCode,
             hex'fe'
         ]));
-        (bool isGameOver, uint8 winnerIdx) = game.playRound();
-        assertFalse(isGameOver);
+        uint8 winnerIdx = game.playRound();
         assertEq(winnerIdx, INVALID_PLAYER_IDX);
     }
 
@@ -128,9 +127,8 @@ contract GameTest is Test {
         ]));
         uint8 winnerIdx;
         while (true) {
-            bool isGameOver;
-            (isGameOver, winnerIdx) = game.playRound();
-            if (isGameOver) break;
+            winnerIdx = game.playRound();
+            if (winnerIdx != INVALID_PLAYER_IDX) break;
         }
         assertEq(winnerIdx, 0);
         (uint8 assetIdx, uint256 bal) = _getMaxNonGoldAssetBalance(game, winnerIdx);
@@ -146,9 +144,8 @@ contract GameTest is Test {
         ]));
         uint8 winnerIdx;
         while (true) {
-            bool isGameOver;
-            (isGameOver, winnerIdx) = game.playRound();
-            if (isGameOver) break;
+            winnerIdx = game.playRound();
+            if (winnerIdx != INVALID_PLAYER_IDX) break;
         }
         assertEq(winnerIdx, 0);
         (uint8 assetIdx, uint256 bal) = _getMaxNonGoldAssetBalance(game, winnerIdx);
@@ -165,8 +162,7 @@ contract GameTest is Test {
             type(NoopPlayer).creationCode
         ]));
         game.setMockWinner(players[1]);
-        (bool isGameOver, uint8 winnerIdx) = game.playRound();
-        assertTrue(isGameOver);
+        uint8 winnerIdx = game.playRound();
         assertEq(winnerIdx, 1);
         assertTrue(game.isGameOver());
     }
@@ -232,7 +228,7 @@ contract GameTest is Test {
         assertEq(winnerIdx, 1);
     }
 
-    function test_findWinner_whenAtMaxRoundsAndEveryPlayerHasZeroOfANonGoldAsset_returnsNoWinner() external {
+    function test_findWinner_whenAtMaxRoundsAndEveryPlayerHasZeroOfANonGoldAsset_returnsFirstPlayer() external {
         (TestGame game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode,
@@ -240,7 +236,7 @@ contract GameTest is Test {
         ]));
         game.setRound(MAX_ROUNDS);
         uint8 winnerIdx = game.findWinner();
-        assertEq(winnerIdx, INVALID_PLAYER_IDX);
+        assertEq(winnerIdx, 0);
     }
 
     function test_playRound_WinnerBuildsBlock() external {
@@ -518,8 +514,8 @@ contract GameTest is Test {
         vm.expectEmit(true, true, true, true);
         // This will actually trigger a MinGasError because the turn gas lower than what
         // grantTurn() requires.
-        // emit Game.PlayerTurnFailedWarning(1, abi.encodeWithSelector(Game.AccessError.selector));
-        emit Game.PlayerTurnFailedWarning(1, abi.encodeWithSelector(Game.MinGasError.selector));
+        // emit Game.PlayerTurnFailed(1, abi.encodeWithSelector(Game.AccessError.selector));
+        emit Game.PlayerTurnFailed(1, abi.encodeWithSelector(Game.MinGasError.selector));
         vm.expectEmit(true, true, true, true);
         emit Game.DefaultBlockBuilt(0);
         game.__buildBlock(NULL_PLAYER, 0);
@@ -533,7 +529,7 @@ contract GameTest is Test {
         TestPlayer(address(players[0])).setRevertOnTurn(RevertMode.Revert);
         game.setCurrentBuilder(players[1]);
         vm.expectEmit(true, true, true, true);
-        emit Game.PlayerTurnFailedWarning(0, abi.encodeWithSelector(TestError.selector));
+        emit Game.PlayerTurnFailed(0, abi.encodeWithSelector(TestError.selector));
         vm.prank(address(players[1]));
         game.grantTurn(0);
     }
@@ -815,41 +811,18 @@ contract GameTest is Test {
     function _minePlayers(Game game, bytes[] memory playerCreationCodes)
         private view returns (uint256[] memory salts, IPlayer[] memory players)
     {
-        salts = new uint256[](playerCreationCodes.length);
-        players = new IPlayer[](playerCreationCodes.length);
-        for (uint256 i; i < playerCreationCodes.length; ++i) {
-            (salts[i], players[i]) = _findPlayerSaltAndAddress(
-                game,
-                playerCreationCodes[i],
-                uint8(i),
-                uint8(playerCreationCodes.length)
-            );
-        }
-    }
-
-    function _findPlayerSaltAndAddress(
-        Game game,
-        bytes memory creationCode,
-        uint8 playerIdx,
-        uint8 playerCount
-    )
-        internal view returns (uint256 salt, IPlayer player)
-    {
-        bytes32 initCodeHash =
-            keccak256(abi.encodePacked(creationCode, abi.encode(playerIdx, playerCount)));
-        unchecked {
-            for (salt = T.randomUint256(); true; ++salt) {
-                uint256 create2Salt = uint256(keccak256(abi.encode(salt, game)));
-                address addr = T.getCreate2Address(initCodeHash, address(sc2), create2Salt);
-                if ((uint160(addr) & 7) == playerIdx) {
-                    return (salt, IPlayer(addr));
-                }
-            }
-        }
+        address[] memory addrs;
+        (salts, addrs) = LibMatchUtils.minePlayerSaltsAndAddresses(
+            address(game),
+            address(sc2),
+            bytes32(uint256(1337)),
+            playerCreationCodes
+        );
+        assembly ("memory-safe") { players := addrs }
     }
 
     function _getNextDeployAddress() internal view returns (address) {
-        return T.getCreateAddress(address(this), vm.getNonce(address(this)));
+        return LibMatchUtils.getCreateAddress(address(this), uint32(vm.getNonce(address(this))));
     }
 
     function _getMaxAssetBalance(Game game, uint8 playerIdx)
