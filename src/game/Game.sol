@@ -40,10 +40,10 @@ contract Game is AssetMarket {
 
     uint16 internal _round;
     bool _inRound;
+    uint8 _isPlayerIncludedInRoundBitmap;
+    IPlayer _builder;
     mapping (uint8 playerIdx => mapping (uint8 assetIdx => uint256 balance)) public balanceOf;
     mapping (uint8 playerIdx => IPlayer player) internal  _playerByIdx;
-    IPlayer _builder;
-    uint8 _isPlayerIncludedInRoundBitmap;
 
     error GameOverError();
     error GameSetupError(string msg);
@@ -70,6 +70,7 @@ contract Game is AssetMarket {
     event BuildPlayerBlockFailedWarning(bytes data);
     event Swap(uint8 playerIdx, uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount, uint256 toAmount);
     event GameOver(uint16 rounds, uint8 winnerIdx); 
+    event PlayerBlockGasUsage(uint8 builderIdx, uint256 gasUsed);
 
     modifier onlyGameMaster() {
         if (msg.sender != GM) revert AccessError();
@@ -116,7 +117,7 @@ contract Game is AssetMarket {
         {
             bytes memory initArgs = abi.encode(0, PLAYER_COUNT);
             for (uint8 i; i < PLAYER_COUNT; ++i) {
-                assembly ("memory-safe") { mstore(add(initArgs, 0x20), i) }
+                assembly ('memory-safe') { mstore(add(initArgs, 0x20), i) }
 
                 IPlayer player;
                 try sc2.safeCreate2{gas: MAX_CREATION_GAS}(
@@ -326,10 +327,13 @@ contract Game is AssetMarket {
         internal returns (uint256 bid)
     {
         IPlayer builder = players[builderIdx];
+        uint256 gasUsed = gasleft();
         try this.buildPlayerBlockAndRevert(builder) {
             // Call must revert.
             assert(false);
         } catch (bytes memory data) {
+            gasUsed -= gasleft(); 
+            emit PlayerBlockGasUsage(builderIdx, gasUsed);
             bytes4 selector = data.getSelectorOr(bytes4(0));
             if (selector == BuildPlayerBlockAndRevertSuccess.selector) {
                 data = data.trimLeadingBytesDestructive(4);
@@ -391,7 +395,9 @@ contract Game is AssetMarket {
         _builder = NULL_PLAYER;
     }
 
-    function _safeCallTurn(IPlayer player, uint8 builderIdx) internal virtual returns (bool success) {
+    function _safeCallTurn(IPlayer player, uint8 builderIdx)
+        internal virtual returns (bool success)
+    {
         bytes memory resultData;
         // 63/64 rule protects us from call depth discovery.
         (success, resultData) = address(player).safeCall(
