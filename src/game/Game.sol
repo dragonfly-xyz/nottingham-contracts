@@ -486,4 +486,61 @@ contract Game is AssetMarket {
     function _assertValidAsset(uint8 assetIdx) private view {
         if (assetIdx >= ASSET_COUNT) revert InvalidAssetError();
     }
+
+    function getBundleHash(PlayerBundle memory bundle, uint16 round_) public view returns (bytes32 hash) {
+        return bytes32((uint256(keccak256(abi.encode(bundle))) & ~uint256(0xFFFF)) | round_);
+    }
+
+    function getRoundFromBundleHash(bytes32 hash) public pure returns (uint16 round_) {
+        return uint16(uint256(hash) & 0xFFFF);
+    }
+
+    error InsufficientBalanceError();
+
+    function fulfill(uint8 playerIdx, PlayerBundle memory bundle)
+        external
+        onlyBuilder returns (bool success)
+    {
+        {
+            uint16 round_ = _round;
+            {
+                bytes32 lastHash = _getPlayerLastBundleHash(playerIdx);
+                if (lastHash != 0 && getRoundFromBundleHash(lastHash) == round)) {
+                    revert PlayerBundleAlreadyFulfilledError();
+                }
+            }
+            _setPlayerLastBundleHash(getBundleHash(bundle, round_));
+        }
+        if (gasleft() < MIN_GAS_PER_BUNDLE_SWAP * bundle.length + 2e3) {
+            revert InsufficientBundleGasError();
+        }
+        try this.selfSettleBundle(playerIdx, bundle) {
+            success = true;
+        } catch {}
+        emit PlayerBundleFulfilled(playerIdx);
+        return success;
+    }
+
+    function selfSettleBundle(uint8 playerIdx, PlayerBundle memory bundle) external onlySelf {
+        for (uint256 i; i < bundle.swaps.length; ++i) {
+            uint256 toAmount = _swap(playerIdx, swap.fromAssetIdx, swap.toAssetIdx, swap.fromAmount);
+            if (toAmount < swap.minToAmount) {
+                revert SlippageError();
+            }
+        }
+    }
+
+    uint256 constant PLAYER_BUNDLE_HASH_TSLOT = 1;
+
+    function _getPlayerLastBundleHash(uint8 playerIdx) private view returns (bytes32 hash) {
+        assembly ('memory-safe') {
+            hash := tload(add(PLAYER_BUNDLE_HASH_TSLOT, playerIdx))
+        }
+    }
+
+    function _setPlayerLastBundleHash(uint8 playerIdx, bytes32 hash) private {
+        assembly ('memory-safe') {
+            tstore(add(PLAYER_BUNDLE_HASH_TSLOT, playerIdx), hash)
+        }
+    }
 }
