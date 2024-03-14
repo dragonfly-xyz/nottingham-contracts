@@ -19,9 +19,9 @@ uint256 constant MIN_WINNING_ASSET_BALANCE = 32e18;
 uint256 constant MARKET_STARTING_GOLD = 200e18;
 uint256 constant MARKET_STARTING_GOODS = 100e18;
 uint8 constant INVALID_PLAYER_IDX = type(uint8).max;
-uint256 constant MAX_CREATION_GAS = 4e6;
-uint256 constant MAX_TURN_GAS = 4e6;
-uint256 constant MAX_BUILD_GAS = 64e6;
+uint256 constant MAX_CREATION_GAS = 8e6;
+uint256 constant MAX_TURN_GAS = 2e6;
+uint256 constant MAX_BUILD_GAS = 16e6;
 uint256 constant MAX_RETURN_DATA_SIZE = 1024;
 uint256 constant INCOME_AMOUNT = 1e18;
 
