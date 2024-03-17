@@ -13,7 +13,8 @@ import {
     GOLD_IDX,
     INVALID_PLAYER_IDX,
     INCOME_AMOUNT,
-    MAX_BUILD_GAS,
+    BUILD_GAS_BASE,
+    BUILD_GAS_PER_PLAYER,
     DEFAULT_BUILDER
 } from "~/game/Game.sol";
 import { AssetMarket } from "~/game/Markets.sol";
@@ -22,22 +23,14 @@ import { LibBytes } from "~/game/LibBytes.sol";
 import { LibMatchUtils } from "~/game/LibMatchUtils.sol";
 import { SafeCreate2 } from "~/game/SafeCreate2.sol";
 
-enum RevertMode {
-    None,
-    Revert,
-    Invalid
-}
-
 using LibBytes for bytes;
 
 event PlayerCreated(address self, uint8 playerIdx, uint8 playerCount);
 event Turning(uint16 round, uint8 playerIdx, uint8 builderIdx);
 event Building(uint16 round, uint8 playerIdx);
 error TestError();
-event TurnState(uint8 playerIdx, uint8 builderIdx, bytes32 h);
-event BuildBlockState(uint8 builderIdx, bytes32 h);
 
-bytes32 constant TURN_STATE_EVENT_SIGNATURE = keccak256('TurnState(uint8,uint8,bytes32)');
+bytes32 constant CREATE_BUNDLE_STATE_EVENT_SIGNATURE = keccak256('CreateBundleState(uint8,uint8,bytes32)');
 bytes32 constant BUILD_BLOCK_EVENT_SIGNATURE = keccak256('BuildBlockState(uint8,bytes32)');
 
 function isAddressCold(address addr) view returns (bool isCold) {
@@ -51,6 +44,14 @@ function isAddressCold(address addr) view returns (bool isCold) {
 
 contract GameTest is Test {
     SafeCreate2 sc2 = new SafeCreate2();
+
+    function revertBack(bytes memory revertData) external {
+        revertData.rawRevert();
+    }
+
+    function throwInvalid() external {
+        T.throwInvalid();
+    }
 
     function test_deploysPlayersWithArgs() external {
         address gameAddress = _getNextDeployAddress();
@@ -167,7 +168,7 @@ contract GameTest is Test {
         assertTrue(game.isGameOver());
     }
 
-    function test_distributeIncome_givesOneEtherOfEveryAssetToEveryPlayer() external {
+    function test_distributeIncome_givesAssetsToEveryPlayer() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode,
@@ -183,7 +184,7 @@ contract GameTest is Test {
             game.__distributeIncome();
             for (uint8 playerIdx; playerIdx < players.length; ++playerIdx) {
                 for (uint8 assetIdx; assetIdx < assetCount; ++assetIdx) {
-                    assertEq(game.balanceOf(playerIdx, assetIdx), 1 ether * (i + 1));
+                    assertEq(game.balanceOf(playerIdx, assetIdx), INCOME_AMOUNT);
                 }
             }
         }
@@ -239,7 +240,7 @@ contract GameTest is Test {
         assertEq(winnerIdx, 0);
     }
 
-    function test_playRound_WinnerBuildsBlock() external {
+    function test_playRound_BidWinnerBuildsBlock() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
             type(TestPlayer).creationCode
@@ -328,7 +329,7 @@ contract GameTest is Test {
     function test_buildPlayerBlock_cannotIncludePlayerMoreThanOnce() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
-            type(DoubleIncludePlayer).creationCode
+            type(DoubleSettlePlayer).creationCode
         ]));
         vm.expectRevert(abi.encodeWithSelector(
             Game.PlayerBuildBlockFailedError.selector,
@@ -426,7 +427,7 @@ contract GameTest is Test {
         uint256 gasUsed = gasleft();
         game.__buildPlayerBlock(builder);
         gasUsed -= gasleft();
-        assertApproxEqAbs(gasUsed, MAX_BUILD_GAS, 32e3);
+        assertApproxEqAbs(gasUsed, BUILD_GAS_BASE, 32e3);
     }
    
     function test_buildPlayerBlock_revertingPlayerCountsAsIncluded() external {
@@ -508,7 +509,7 @@ contract GameTest is Test {
     function test_grantTurn_cannotBeCalledByNonBuilderDuringDefaultBlock() external {
         (TestGame game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
-            type(GrantTurnOnTurnPlayer).creationCode,
+            type(CallbackPlayer).creationCode,
             type(NoopPlayer).creationCode
         ]));
         vm.expectEmit(true, true, true, true);
@@ -556,8 +557,9 @@ contract GameTest is Test {
                 if (playerIdx == 1) {
                     player1BuildBlockStateHashes[player1BuildBlockStateHashesLen++] = h;
                 }
-            } else if (log.topics[0] == TURN_STATE_EVENT_SIGNATURE) {
-                (uint8 playerIdx, uint8 builderIdx, bytes32 h) = abi.decode(log.data, (uint8, uint8, bytes32));
+            } else if (log.topics[0] == CREATE_BUNDLE_STATE_EVENT_SIGNATURE) {
+                (uint8 playerIdx, uint8 builderIdx, bytes32 h) =
+                    abi.decode(log.data, (uint8, uint8, bytes32));
                 if (playerIdx == 0 && builderIdx == 1) {
                     player0TurnStateHashes[player0TurnStateHashesLen++] = h;
                 }
@@ -822,7 +824,10 @@ contract GameTest is Test {
     }
 
     function _getNextDeployAddress() internal view returns (address) {
-        return LibMatchUtils.getCreateAddress(address(this), uint32(vm.getNonce(address(this))));
+        return LibMatchUtils.getCreateAddress(
+            address(this),
+            uint32(vm.getNonce(address(this)))
+        );
     }
 
     function _getMaxAssetBalance(Game game, uint8 playerIdx)
@@ -948,7 +953,7 @@ contract TestGame is Game {
 }
 
 contract NoopPlayer is IPlayer {
-    uint8 public PLAYER_IDX;
+    uint8 public immutable PLAYER_IDX;
     uint8 immutable PLAYER_COUNT;
 
     constructor(uint8 playerIdx, uint8 playerCount) {
@@ -957,51 +962,78 @@ contract NoopPlayer is IPlayer {
         emit PlayerCreated(address(this), playerIdx, playerCount);
     }
 
-    function turn(uint8 builderIdx) public virtual {
+    function createBundle(uint8 builderIdx)
+        public virtual returns (PlayerBundle memory bundle)
+    {
         emit Turning(Game(msg.sender).round(), PLAYER_IDX, builderIdx);
     }
 
-    function buildBlock() public virtual returns (uint256) {
+    function buildBlock(PlayerBundle[] calldata bundles)
+        public virtual returns (uint256 bid)
+    {
         emit Building(Game(msg.sender).round(), PLAYER_IDX);
         return 0;
     }
 }
 
-contract RevertingPlayer is NoopPlayer {
-    constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
-    function turn(uint8) public override pure { T.throwInvalid(); }
-    function buildBlock() public override pure returns (uint256) { T.throwInvalid(); }
-}
-
-contract DoubleIncludePlayer is NoopPlayer {
-    constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
-    
-    function buildBlock() public override returns (uint256) {
-        super.buildBlock();
-        TestGame game = TestGame(msg.sender);
-        game.grantTurn(0);
-        game.grantTurn(0);
-        return 1;
+contract CallbackPlayer is NoopPlayer {
+    struct Call {
+        address target;
+        bytes data;
     }
-}
 
-contract GrantTurnOnTurnPlayer is NoopPlayer {
+    event Called(
+        bytes4 playerFnSelector,
+        address target,
+        bytes data,
+        bool succeeded,
+        bytes resultData
+    );
+
+    mapping (bytes4 playerFnSelector => Call[]) _calls;
+    
     constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
     
-    function turn(uint8 builderIdx) public override {
-        super.turn(builderIdx);
-        Game(msg.sender).grantTurn((PLAYER_IDX + 1) % PLAYER_COUNT);
+    function setCallback(bytes4 playerFnSelector, address target, bytes calldata data) external {
+        _calls[playerFnSelector] = Call(target, data);
+    }
+    
+    function createBundle(uint8 builderIdx)
+        public override returns (PlayerBundle memory bundle)
+    {
+        _doCalls();
+    }
+
+    function buildBlock(PlayerBundle[] calldata bundles)
+        public override returns (PlayerBundle memory bundle)
+    {
+        _doCalls();
+    }
+
+    function _doCalls() private {
+        Call[] storage calls = _calls[msg.sig];
+        uint256 n = calls.length;
+        for (uint256 i; i < n; ++i) {
+            Call memory call_ = calls[i];
+            (bool success, bytes memory resultData) = call_.target.call(call_.data);
+            emit Called(msg.sig, call_.target, call_.data, success, resultData);
+        }
     }
 }
 
 contract StateTrackingPlayer is NoopPlayer {
+    event CreateBundleState(uint8 playerIdx, uint8 builderIdx, bytes32 h);
+    event BuildBlockState(uint8 builderIdx, bytes32 h);
+
     constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
 
-    function turn(uint8 builderIdx) public override {
-        emit TurnState(PLAYER_IDX, builderIdx, _getStateHash());
+    function createBundle(uint8 builderIdx) public override {
+        emit CreateBundleState(PLAYER_IDX, builderIdx, _getStateHash());
     }
 
-    function buildBlock() public override returns (uint256) {
+    function buildBlock(PlayerBundle[] calldata bundles)
+        public override returns (uint256)
+    {
         emit BuildBlockState(PLAYER_IDX, _getStateHash());
         TestGame game = TestGame(msg.sender);
         for (uint8 i; i < PLAYER_COUNT; ++i) game.grantTurn(i);
@@ -1022,33 +1054,25 @@ contract StateTrackingPlayer is NoopPlayer {
     }
 }
 
-contract TestPlayer is NoopPlayer {
+contract TestPlayer is CallbackPlayer {
     struct AssetOwed {
         IPlayer player;
         uint8 assetIdx;
         uint256 amount;
     }
 
-    struct PreparedCall {
-        address target;
-        bytes callData;
-    }
-
     IPlayer public ignoredPlayer;
     uint256 public bid;
-    RevertMode public revertOnBuild;
-    RevertMode public revertOnTurn;
     AssetOwed[] public mints;
     AssetOwed[] public burns;
-    PreparedCall public preparedCall;
 
     constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
 
-    function turn(uint8 builderIdx) public override {
-        super.turn(builderIdx);
+    function createBundle(uint8 builderIdx)
+        public override returns (PlayerBundle memory bundle)
+    {
+        bundle = super.createBundle(builderIdx);
         TestGame game = TestGame(msg.sender);
-        if (revertOnTurn == RevertMode.Revert) revert TestError();
-        else if (revertOnTurn == RevertMode.Invalid) T.throwInvalid();
         for (uint256 i; i < mints.length; ++i) {
             AssetOwed memory ao = mints[i];
             game.mintAssetTo(ao.player, ao.assetIdx, ao.amount);
@@ -1057,46 +1081,22 @@ contract TestPlayer is NoopPlayer {
             AssetOwed memory ao = burns[i];
             game.burnAssetFrom(ao.player, ao.assetIdx, ao.amount);
         }
-        if (preparedCall.target != address(0)) {
-            (bool s, bytes memory r) = preparedCall.target.call(preparedCall.callData);
-            if (!s) r.rawRevert();
-        }
     }
 
-    function buildBlock() public override returns (uint256) {
+    function buildBlock(PlayerBundle[] calldata bundles)
+        public override returns (uint256)
+    {
         super.buildBlock();
         TestGame game = TestGame(msg.sender);
-        if (revertOnBuild == RevertMode.Revert) revert TestError();
-        else if (revertOnBuild == RevertMode.Invalid) T.throwInvalid();
         for (uint8 i; i < PLAYER_COUNT; ++i) {
             if (ignoredPlayer != NULL_PLAYER && getIndexFromPlayer(ignoredPlayer) == i) continue;
             game.grantTurn(i);
         }
         return bid;
     }
-
-    function setCallOnTurn(address target, bytes calldata cd) external {
-        preparedCall = PreparedCall(target, cd);
-    }
-
-    function addMintOnTurn(IPlayer player, uint8 assetIdx, uint256 amount) external {
-        mints.push(AssetOwed(player, assetIdx, amount));
-    }
-
-    function addBurnOnTurn(IPlayer player, uint8 assetIdx, uint256 amount) external {
-        burns.push(AssetOwed(player, assetIdx, amount));
-    }
    
     function setBid(uint256 bid_) external {
         bid = bid_;
-    }
-
-    function setRevertOnBuild(RevertMode mode) external {
-        revertOnBuild = mode;
-    }
-
-    function setRevertOnTurn(RevertMode mode) external {
-        revertOnTurn = mode;
     }
 
     function ignorePlayer(IPlayer player) external {
