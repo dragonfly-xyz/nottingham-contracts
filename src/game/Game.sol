@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8;
+pragma solidity ^0.8.25;
 
 import { AssetMarket } from './Markets.sol';
 import { LibBytes } from './LibBytes.sol';
@@ -8,7 +8,6 @@ import { IPlayer, PlayerBundle, SwapSell } from './IPlayer.sol';
 import { SafeCreate2 } from './SafeCreate2.sol';
 
 IPlayer constant NULL_PLAYER = IPlayer(address(0));
-IPlayer constant DEFAULT_BUILDER = IPlayer(address(type(uint160).max));
 uint160 constant PLAYER_ADDRESS_INDEX_MASK = 7;
 uint8 constant GOLD_IDX = 0;
 uint256 constant MIN_PLAYERS = 2;
@@ -50,9 +49,8 @@ contract Game is AssetMarket {
 
     uint256 constant PLAYER_BUNDLE_HASH_TSLOT = 1;
 
-    address public immutable GM;
-    uint8 public immutable PLAYER_COUNT;
-
+    address public immutable gm;
+    uint8 public immutable playerCount;
     uint16 internal _round;
     bool _inRound;
     IPlayer _builder;
@@ -84,14 +82,15 @@ contract Game is AssetMarket {
     event Transfer(uint8 fromPlayerIdx, uint8 toPlayerIdx, uint8 assetIdx, uint256 assetAmount);    
     event BlockBid(uint8 builderIdx, uint256 bid);
     event BlockBuilt(uint16 round, uint8 builderIdx, uint256 bid);
-    event BuildPlayerBlockFailed(uint256 builderIdx, bytes data);
+    event EmptyBlock(uint16 round);
+    event BuildPlayerBlockFailed(uint8 builderIdx, bytes data);
     event Swap(uint8 playerIdx, uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount, uint256 toAmount);
     event GameOver(uint16 rounds, uint8 winnerIdx); 
     event PlayerBlockGasUsage(uint8 builderIdx, uint256 gasUsed);
     event BundleSettled(uint8 playerIdx, bool success, PlayerBundle bundle);
 
     modifier onlyGameMaster() {
-        if (msg.sender != GM) revert AccessError();
+        if (msg.sender != gm) revert AccessError();
         _;
     }
    
@@ -116,15 +115,15 @@ contract Game is AssetMarket {
         if (playerCreationCodes.length != deploySalts.length) {
             revert GameSetupError('mismatched arrays');
         }
-        GM = gameMaster;
-        PLAYER_COUNT = uint8(playerCreationCodes.length);
-        if (PLAYER_COUNT < MIN_PLAYERS || PLAYER_COUNT > MAX_PLAYERS) {
+        gm = gameMaster;
+        playerCount = uint8(playerCreationCodes.length);
+        if (playerCount < MIN_PLAYERS || playerCount > MAX_PLAYERS) {
             revert GameSetupError('# of players');
         }
-        PLAYER_COUNT = uint8(playerCreationCodes.length);
+        playerCount = uint8(playerCreationCodes.length);
         {
-            bytes memory initArgs = abi.encode(0, PLAYER_COUNT);
-            for (uint8 i; i < PLAYER_COUNT; ++i) {
+            bytes memory initArgs = abi.encode(0, playerCount);
+            for (uint8 i; i < playerCount; ++i) {
                 assembly ('memory-safe') { mstore(add(initArgs, 0x20), i) }
 
                 IPlayer player;
@@ -151,9 +150,9 @@ contract Game is AssetMarket {
             // at least one asset will be in contention.
             uint8 assetCount_ = uint8(ASSET_COUNT);
             uint256[] memory assetReserves = new uint256[](assetCount_);
-            assetReserves[GOLD_IDX] = MARKET_STARTING_GOLD_PER_PLAYER * PLAYER_COUNT;
+            assetReserves[GOLD_IDX] = MARKET_STARTING_GOLD_PER_PLAYER * playerCount;
             for (uint8 i = 1; i < assetCount_; ++i) {
-                assetReserves[i] = MARKET_STARTING_GOODS_PER_PLAYER * PLAYER_COUNT;
+                assetReserves[i] = MARKET_STARTING_GOODS_PER_PLAYER * playerCount;
             }
             AssetMarket._init(assetReserves);
         }
@@ -165,7 +164,7 @@ contract Game is AssetMarket {
     }
 
     function scorePlayers() external view returns (uint256[] memory scores) {
-        scores = new uint256[](PLAYER_COUNT);
+        scores = new uint256[](playerCount);
         for (uint8 playerIdx; playerIdx < scores.length; ++playerIdx) {
             (, scores[playerIdx]) = _getMaxNonGoldAssetForPlayer(playerIdx);
         }
@@ -237,7 +236,7 @@ contract Game is AssetMarket {
         external onlyBuilder returns (uint256 toAmount)
     {
         // Caller must be builder, which is always a valid player.
-        uint8 playerIdx = IPlayer(msg.sender);
+        uint8 playerIdx = getIndexFromPlayer(IPlayer(msg.sender));
         return _sellAs(playerIdx, fromAssetIdx, toAssetIdx, fromAmount);
     }
 
@@ -245,7 +244,7 @@ contract Game is AssetMarket {
         external onlyBuilder returns (uint256 fromAmount)
     {
         // Caller must be builder, which is always a valid player.
-        uint8 playerIdx = IPlayer(msg.sender);
+        uint8 playerIdx = getIndexFromPlayer(IPlayer(msg.sender));
         return _buyAs(playerIdx, fromAssetIdx, toAssetIdx, toAmount);
     }
 
@@ -258,7 +257,7 @@ contract Game is AssetMarket {
     function settleBundle(uint8 playerIdx, PlayerBundle memory bundle)
         external onlyBuilder returns (bool success)
     {
-        if (playerIdx >= PLAYER_COUNT) revert InvalidPlayerError();
+        if (playerIdx >= playerCount) revert InvalidPlayerError();
         {
             uint16 round_ = _round;
             {
@@ -269,7 +268,7 @@ contract Game is AssetMarket {
             }
             _setPlayerLastBundleHash(playerIdx, getBundleHash(bundle, round_));
         }
-        if (gasleft() < MIN_GAS_PER_BUNDLE_SWAP * bundle.length + 2e3) {
+        if (gasleft() < MIN_GAS_PER_BUNDLE_SWAP * bundle.swaps.length + 2e3) {
             revert InsufficientBundleGasError();
         }
         try this.selfSettleBundle(playerIdx, bundle) {
@@ -285,13 +284,13 @@ contract Game is AssetMarket {
     {
         for (uint256 i; i < bundle.swaps.length; ++i) {
             SwapSell memory swap = bundle.swaps[i];
-            uint256 toAmount = _sell(playerIdx, swap.fromAssetIdx, swap.toAssetIdx, swap.fromAmount);
+            uint256 toAmount = _sellAs(playerIdx, swap.fromAssetIdx, swap.toAssetIdx, swap.fromAmount);
             if (toAmount < swap.minToAmount) {
                 revert SlippageError(swap.fromAssetIdx, swap.toAssetIdx, swap.fromAmount, swap.minToAmount, toAmount);
             }
         }
         if (bundle.builderGoldTip != 0) {
-            _transfer(playerIdx, getIndexFromPlayer(msg.sender), GOLD_IDX, bundle.builderGoldTip);
+            _transfer(playerIdx, getIndexFromPlayer(IPlayer(msg.sender)), GOLD_IDX, bundle.builderGoldTip);
         }
     }
 
@@ -302,7 +301,7 @@ contract Game is AssetMarket {
         uint8 maxBalancePlayerIdx;
         uint8 maxBalanceAssetIdx;
         uint256 maxBalance;
-        for (uint8 playerIdx; playerIdx < PLAYER_COUNT; ++playerIdx) {
+        for (uint8 playerIdx; playerIdx < playerCount; ++playerIdx) {
            (uint8 assetIdx, uint256 assetBalance) = _getMaxNonGoldAssetForPlayer(playerIdx);
             if (assetBalance > maxBalance) {
                 maxBalancePlayerIdx = playerIdx;
@@ -353,7 +352,7 @@ contract Game is AssetMarket {
     function _getPlayerBundles(uint8 builderIdx)
         internal returns (PlayerBundle[] memory bundles)
     {
-        uint8 n = PLAYER_COUNT;
+        uint8 n = playerCount;
         bundles = new PlayerBundle[](n);
         for (uint8 playerIdx; playerIdx < n; ++playerIdx) {
             if (builderIdx == playerIdx) {
@@ -408,9 +407,10 @@ contract Game is AssetMarket {
             }
         }
         // All player bundles must be executed (excluding the builder's).
+        uint16 round_ = _round;
         for (uint8 playerIdx; playerIdx < bundles.length; ++playerIdx) {
             if (playerIdx != builderIdx) {
-                if (_getPlayerLastBundleHash(playerIdx) != getBundleHash(bundles[playerIdx])) {
+                if (_getPlayerLastBundleHash(playerIdx) != getBundleHash(bundles[playerIdx], round_)) {
                     revert BundleNotSettledError(builderIdx, playerIdx);
                 }
             }
@@ -426,7 +426,7 @@ contract Game is AssetMarket {
         (success, resultData) = address(builder).safeCall(
             abi.encodeCall(IPlayer.buildBlock, (bundles)),
             false,
-            BUILD_GAS_BASE + BUILD_GAS_PER_PLAYER * PLAYER_COUNT,
+            BUILD_GAS_BASE + BUILD_GAS_PER_PLAYER * playerCount,
             MAX_RETURN_DATA_SIZE
         );
         if (!success || resultData.length != 32) {
@@ -443,13 +443,13 @@ contract Game is AssetMarket {
         (bool success, bytes memory resultData) = address(builder).safeCall(
             abi.encodeCall(IPlayer.createBundle, (builderIdx)),
             false,
-            TURN_GAS_BASE + TURN_GAS_PER_PLAYER * PLAYER_COUNT,
+            TURN_GAS_BASE + TURN_GAS_PER_PLAYER * playerCount,
             MAX_RETURN_DATA_SIZE
         );
         if (!success) {
             resultData.rawRevert();
         } else {
-            bundle = abi.decode(bundle, (PlayerBundle));
+            bundle = abi.decode(resultData, (PlayerBundle));
             if (bundle.swaps.length > ASSET_COUNT - 1) {
                 revert TooManySwapsError();
             }
@@ -459,7 +459,8 @@ contract Game is AssetMarket {
     function _auctionBlock()
         internal virtual returns (uint8 builderIdx, uint256 builderBid)
     {
-        for (uint8 i; i < PLAYER_COUNT; ++i) {
+        builderIdx = INVALID_PLAYER_IDX;
+        for (uint8 i; i < playerCount; ++i) {
             uint256 bid = _simulateBuildPlayerBlock(i);
             if (bid != 0) {
                 emit BlockBid(i, bid);
@@ -477,13 +478,15 @@ contract Game is AssetMarket {
             assert(_buildPlayerBlock(builderIdx) == builderBid);
             lastWinningBid = builderBid;
             emit BlockBuilt(_round, builderIdx, builderBid);
+        } else {
+            emit EmptyBlock(_round);
         }
     }
 
     function _distributeIncome() internal virtual {
         uint8 numAssets = ASSET_COUNT;
         // Mint 1 unit of each type of asset to each player.
-        for (uint8 playerIdx; playerIdx < PLAYER_COUNT; ++playerIdx) {
+        for (uint8 playerIdx; playerIdx < playerCount; ++playerIdx) {
             for (uint8 assetIdx; assetIdx < numAssets; ++assetIdx) {
                 _mint({playerIdx: playerIdx, assetIdx: assetIdx, assetAmount: INCOME_AMOUNT});
             }
