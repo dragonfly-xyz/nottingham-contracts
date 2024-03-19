@@ -34,7 +34,7 @@ function getIndexFromPlayer(IPlayer player) pure returns (uint8 playerIdx) {
 }
 
 function getBundleHash(PlayerBundle memory bundle, uint16 round)
-    view returns (bytes32 hash)
+    pure returns (bytes32 hash)
 {
     return bytes32((uint256(keccak256(abi.encode(bundle))) & ~uint256(0xFFFF)) | round);
 }
@@ -359,7 +359,6 @@ contract Game is AssetMarket {
                 // Builder doesn't need a bundle.
                 continue;
             }
-            IPlayer player = _playerByIdx[playerIdx];
             try this.selfCallPlayerCreateBundle(playerIdx, builderIdx)
                 returns (PlayerBundle memory bundle)
             {
@@ -439,8 +438,8 @@ contract Game is AssetMarket {
     function selfCallPlayerCreateBundle(uint8 playerIdx, uint8 builderIdx)
         external onlySelf returns (PlayerBundle memory bundle)
     {
-        IPlayer builder = _playerByIdx[builderIdx];
-        (bool success, bytes memory resultData) = address(builder).safeCall(
+        IPlayer player = _playerByIdx[playerIdx];
+        (bool success, bytes memory resultData) = address(player).safeCall(
             abi.encodeCall(IPlayer.createBundle, (builderIdx)),
             false,
             TURN_GAS_BASE + TURN_GAS_PER_PLAYER * playerCount,

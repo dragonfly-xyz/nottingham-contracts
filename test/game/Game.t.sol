@@ -17,7 +17,7 @@ import {
     BUILD_GAS_PER_PLAYER
 } from "~/game/Game.sol";
 import { AssetMarket } from "~/game/Markets.sol";
-import { IPlayer, PlayerBundle } from "~/game/IPlayer.sol";
+import { IPlayer, PlayerBundle, SwapSell } from "~/game/IPlayer.sol";
 import { LibBytes } from "~/game/LibBytes.sol";
 import { LibMatchUtils } from "~/game/LibMatchUtils.sol";
 import { SafeCreate2 } from "~/game/SafeCreate2.sol";
@@ -25,7 +25,7 @@ import { SafeCreate2 } from "~/game/SafeCreate2.sol";
 using LibBytes for bytes;
 
 event PlayerCreated(address self, uint8 playerIdx, uint8 playerCount);
-event Turning(uint8 builderIdx);
+event Bundling(uint8 builderIdx);
 event Building(PlayerBundle[] bundles);
 error TestError();
 
@@ -45,11 +45,11 @@ function isAddressCold(address addr) view returns (bool isCold) {
 contract GameTest is Test {
     SafeCreate2 sc2 = new SafeCreate2();
 
-    function revertBack(bytes memory revertData) external {
+    function revertBack(bytes memory revertData) external pure {
         revertData.rawRevert();
     }
 
-    function throwInvalid() external {
+    function throwInvalid() external pure {
         T.throwInvalid();
     }
 
@@ -152,20 +152,21 @@ contract GameTest is Test {
     }
 
     function test_cannotPlayAnotherRoundAfterWinnerDeclared() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+        (TestGame game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode
         ]));
         uint8 winnerIdx = _getRandomPlayerIdx(game);
         game.setMockWinner(winnerIdx);
-        assertEq(game.playerCount(), winnerIdx);
-        assertTrue(game.isGameOver());
+        assertEq(game.findWinner(), winnerIdx);
+        assertFalse(game.isGameOver());
+        game.playRound();
         vm.expectRevert(Game.GameOverError.selector);
         game.playRound();
     }
 
     function test_gameEndsEarlyIfWinnerFound() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+        (TestGame game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode
         ]));
@@ -176,29 +177,28 @@ contract GameTest is Test {
     }
 
     function test_distributeIncome_givesAssetsToEveryPlayer() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+        (TestGame game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode
         ]));
+        uint8 playerCount = game.playerCount();
         uint8 assetCount = game.assetCount();
-        for (uint8 playerIdx; playerIdx < players.length; ++playerIdx) {
+        for (uint8 playerIdx; playerIdx < playerCount; ++playerIdx) {
             for (uint8 assetIdx; assetIdx < assetCount; ++assetIdx) {
                 assertEq(game.balanceOf(playerIdx, assetIdx), 0);
             }
         }
-        for (uint256 i; i < 3; ++i) {
-            game.__distributeIncome();
-            for (uint8 playerIdx; playerIdx < players.length; ++playerIdx) {
-                for (uint8 assetIdx; assetIdx < assetCount; ++assetIdx) {
-                    assertEq(game.balanceOf(playerIdx, assetIdx), INCOME_AMOUNT);
-                }
+        game.__distributeIncome();
+        for (uint8 playerIdx; playerIdx < playerCount; ++playerIdx) {
+            for (uint8 assetIdx; assetIdx < assetCount; ++assetIdx) {
+                assertEq(game.balanceOf(playerIdx, assetIdx), INCOME_AMOUNT);
             }
         }
     }
 
     function test_findWinner_whenBelowMaxRoundsAndPlayerHasWinningBalanceOfANonGoldAsset_returnsThatPlayer() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+        (TestGame game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode
@@ -206,12 +206,12 @@ contract GameTest is Test {
         uint8 winnerIdx = _getRandomPlayerIdx(game);
         game.setRound(MAX_ROUNDS - 1);
         uint8 assetIdx = _getRandomNonGoldAssetIdx(game);
-        game.mintAssetTo(winnerIdx, assetIdx, MIN_WINNING_ASSET_BALANCE);
+        game.mint(winnerIdx, assetIdx, MIN_WINNING_ASSET_BALANCE);
         assertEq(game.findWinner(), winnerIdx);
     }
 
     function test_findWinner_whenBelowMaxRoundsAndNoPlayerHasWinningBalanceOfANonGoldAsset_returnsNoWinner() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+        (TestGame game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode
@@ -219,12 +219,12 @@ contract GameTest is Test {
         game.setRound(MAX_ROUNDS - 1);
         uint8 nonWinnerIdx = _getRandomPlayerIdx(game);
         uint8 assetIdx = _getRandomNonGoldAssetIdx(game);
-        game.mintAssetTo(nonWinnerIdx, assetIdx, MIN_WINNING_ASSET_BALANCE - 1);
+        game.mint(nonWinnerIdx, assetIdx, MIN_WINNING_ASSET_BALANCE - 1);
         assertEq(game.findWinner(), INVALID_PLAYER_IDX);
     }
 
     function test_findWinner_whenAtMaxRoundsAndNoPlayerHasWinningBalanceOfANonGoldAsset_returnsPlayerWithMaxBalance() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+        (TestGame game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode
@@ -232,7 +232,7 @@ contract GameTest is Test {
         game.setRound(MAX_ROUNDS);
         uint8 winnerIdx = _getRandomPlayerIdx(game);
         uint8 assetIdx = _getRandomNonGoldAssetIdx(game);
-        game.mintAssetTo(winnerIdx, assetIdx, MIN_WINNING_ASSET_BALANCE - 1);
+        game.mint(winnerIdx, assetIdx, MIN_WINNING_ASSET_BALANCE - 1);
         assertEq(game.findWinner(), winnerIdx);
     }
 
@@ -246,7 +246,7 @@ contract GameTest is Test {
         assertEq(game.findWinner(), 0);
     }
 
-    function test_buildBlock_BidWinnerBuildsBlock() external {
+    function test_buildBlock_bidWinnerBuildsBlock() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(TestPlayer).creationCode,
             type(TestPlayer).creationCode
@@ -255,10 +255,30 @@ contract GameTest is Test {
         TestPlayer builder = TestPlayer(address(players[builderIdx]));
         builder.setBid(1337);
         game.setMockBlockAuctionWinner(builderIdx, 1337);
+        game.mint(builderIdx, GOLD_IDX, 1338);
         vm.expectEmit(true, true, true, true, address(builder));
         emit Building(new PlayerBundle[](players.length));
         game.__buildBlock();
-        assertEq(game.balanceOf(builderIdx, GOLD_IDX), INCOME_AMOUNT - 1337);
+        assertEq(game.balanceOf(builderIdx, GOLD_IDX), 1);
+    }
+
+    // Normally this state is unreachable because the auction will invalidate the bid.
+    function test_buildBlock_failsIfBidWinnerHasInsufficientFunds() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        TestPlayer builder = TestPlayer(address(players[builderIdx]));
+        builder.setBid(1337);
+        game.setMockBlockAuctionWinner(builderIdx, 1337);
+        game.mint(builderIdx, GOLD_IDX, 1336);
+        vm.expectRevert(abi.encodeWithSelector(
+            Game.InsufficientBalanceError.selector,
+            builderIdx,
+            GOLD_IDX
+        ));
+        game.__buildBlock();
     }
 
     function test_buildBlock_DoesNothingIfWinningBidIsZero() external {
@@ -274,24 +294,25 @@ contract GameTest is Test {
 
     function test_buildBlock_buildsPlayerBlockIfWinningBidIsNonZero() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(NoopPlayer).creationCode,
+            type(TestPlayer).creationCode,
             type(TestPlayer).creationCode
         ]));
         uint8 builderIdx = _getRandomPlayerIdx(game);
         TestPlayer builder = TestPlayer(address(players[builderIdx]));
         builder.setBid(1);
-        game.mintAssetTo(builderIdx, GOLD_IDX, 1);
+        game.mint(builderIdx, GOLD_IDX, 1);
         game.setMockBlockAuctionWinner(builderIdx, 1);
         vm.expectEmit(true, true, true, true);
         emit Game.BlockBuilt(0, builderIdx, 1);
         game.__buildBlock();
+        assertEq(game.lastWinningBid(), 1);
     }
 
     // This state should be unreachable under normal conditions because the auction
     // process will filter out this activity.
     function test_buildBlock_panicsIfBuilderBidsWithDifferentBidThanAuction() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(NoopPlayer).creationCode,
+            type(TestPlayer).creationCode,
             type(TestPlayer).creationCode
         ]));
         uint8 builderIdx = _getRandomPlayerIdx(game);
@@ -301,79 +322,102 @@ contract GameTest is Test {
         vm.expectRevert();
         game.__buildBlock();
     }
+    
+    function test_buildPlayerBlock_failsIfSettlingTwice() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        TestPlayer builder = TestPlayer(address(players[builderIdx]));
+        // Add an extra settleBundle() call for player 0.
+        builder.addCallback(IPlayer.buildBlock.selector, address(game), abi.encodeCall(
+            Game.settleBundle,
+            (0, PlayerBundle(new SwapSell[](0), 0))
+        ));
+        vm.expectRevert(abi.encodeWithSelector(
+            Game.BuildBlockFailedError.selector,
+            builderIdx,
+            abi.encodeWithSelector(
+                Game.BundleAlreadySettledError.selector,
+                0
+            )
+        ));
+        game.__buildPlayerBlock(builderIdx);
+    }
 
-    // function test_buildPlayerBlock_cannotIncludePlayerMoreThanOnce() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(DoubleSettlePlayer).creationCode
-    //     ]));
-    //     vm.expectRevert(abi.encodeWithSelector(
-    //         Game.PlayerBuildBlockFailedError.selector,
-    //         1,
-    //         abi.encodeWithSelector(Game.PlayerAlreadyIncludedError.selector, 0)
-    //     ));
-    //     game.__buildPlayerBlock(players[1]);
-    // }
+    function test_buildPlayerBlock_failsIfBuilderDoesNotSettleAllBundles() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        uint8 ignoredPlayerIdx = uint8((builderIdx + 1) % game.playerCount());
+        TestPlayer builder = TestPlayer(address(players[builderIdx]));
+        builder.ignorePlayer(ignoredPlayerIdx);
+        vm.expectRevert(abi.encodeWithSelector(
+            Game.BundleNotSettledError.selector,
+            builderIdx,
+            ignoredPlayerIdx
+        ));
+        game.__buildPlayerBlock(builderIdx);
+    }
 
-    // function test_buildPlayerBlock_failsIfBuilderDoesNotIncludeOtherPlayers() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(TestPlayer).creationCode,
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     TestPlayer builder = TestPlayer(address(players[1]));
-    //     builder.setBid(1337);
-    //     builder.ignorePlayer(players[2]);
-    //     vm.expectRevert(abi.encodeWithSelector(Game.PlayerMissingFromBlockError.selector, 1));
-    //     game.__buildPlayerBlock(builder);
-    // }
+    function test_buildPlayerBlock_failsIfBuilderFails() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        TestPlayer builder = TestPlayer(address(players[builderIdx]));
+        builder.addCallback(
+            IPlayer.buildBlock.selector,
+            address(this),
+            abi.encodeCall(this.revertBack, (bytes('oopsie')))
+        );
+        vm.expectRevert(abi.encodeWithSelector(
+            Game.BuildBlockFailedError.selector,
+            builderIdx,
+            bytes('oopsie')
+        ));
+        game.__buildPlayerBlock(builderIdx);
+    }
 
-    // function test_buildPlayerBlock_builderCanExcludeThemself() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(TestPlayer).creationCode,
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     TestPlayer builder = TestPlayer(address(players[1]));
-    //     game.mintAssetTo(builder, GOLD_IDX, 1337);
-    //     builder.setBid(1337);
-    //     builder.ignorePlayer(builder);
-    //     game.__buildPlayerBlock(builder);
-    // }
+    function test_buildPlayerBlock_builderCanExcludeTheirBundle() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        TestPlayer builder = TestPlayer(address(players[builderIdx]));
+        builder.ignorePlayer(builderIdx);
+        game.__buildPlayerBlock(builderIdx);
+    }
 
-    // function test_buildPlayerBlock_failsIfBuilderRevertsDuringBuild() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(TestPlayer).creationCode
-    //     ]));
-    //     TestPlayer builder = TestPlayer(address(players[1]));
-    //     builder.setBid(1337);
-    //     builder.setRevertOnBuild(RevertMode.Revert);
-    //     vm.expectRevert(abi.encodeWithSelector(
-    //         Game.PlayerBuildBlockFailedError.selector,
-    //         1,
-    //         abi.encodeWithSelector(TestError.selector)
-    //     ));
-    //     game.__buildPlayerBlock(builder);
-    // }
-
-    // function test_buildPlayerBlock_failsIfBuilderDoesntHaveFundsAtTheEndOfBlock() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(TestPlayer).creationCode
-    //     ]));
-    //     TestPlayer builder = TestPlayer(address(players[1]));
-    //     builder.setBid(1337);
-    //     builder.addMintOnTurn(builder, GOLD_IDX, 1336);
-    //     vm.expectRevert(abi.encodeWithSelector(
-    //         Game.InsufficientBalanceError.selector,
-    //         1,
-    //         GOLD_IDX
-    //     ));
-    //     game.__buildPlayerBlock(builder);
-    // }
+    function test_buildPlayerBlock_failsIfBuilderDoesntHaveFundsAtTheEndOfBlock() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        TestPlayer builder = TestPlayer(address(players[builderIdx]));
+        builder.setBid(1337);
+        // Mint 1336 gold on build.
+        builder.addCallback(
+            IPlayer.buildBlock.selector,
+            address(game),
+            abi.encodeCall(TestGame.mint, (builderIdx, GOLD_IDX, 1336))
+        );
+        vm.expectRevert(abi.encodeWithSelector(
+            Game.InsufficientBalanceError.selector,
+            builderIdx,
+            GOLD_IDX
+        ));
+        game.__buildPlayerBlock(builderIdx);
+    }
 
     // function test_buildPlayerBlock_succeedsIfBuilderDoesHaveFundsAtTheEndOfBlock() external {
     //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
@@ -422,11 +466,11 @@ contract GameTest is Test {
     //     ]));
     //     TestPlayer[] memory builders;
     //     assembly ("memory-safe") { builders := players }
-    //     game.mintAssetTo(builders[0], GOLD_IDX, 100);
+    //     game.mint(builders[0], GOLD_IDX, 100);
     //     builders[0].setBid(100);
-    //     game.mintAssetTo(builders[1], GOLD_IDX, 300);
+    //     game.mint(builders[1], GOLD_IDX, 300);
     //     builders[1].setBid(300);
-    //     game.mintAssetTo(builders[2], GOLD_IDX, 200);
+    //     game.mint(builders[2], GOLD_IDX, 200);
     //     builders[2].setBid(200);
     //     (uint8 builderIdx, uint256 bid) = game.__auctionBlock();
     //     assertEq(builderIdx, 1);
@@ -441,12 +485,12 @@ contract GameTest is Test {
     //     ]));
     //     TestPlayer[] memory builders;
     //     assembly ("memory-safe") { builders := players }
-    //     game.mintAssetTo(builders[0], GOLD_IDX, 100);
+    //     game.mint(builders[0], GOLD_IDX, 100);
     //     builders[0].setBid(100);
-    //     game.mintAssetTo(builders[1], GOLD_IDX, 300);
+    //     game.mint(builders[1], GOLD_IDX, 300);
     //     builders[1].setBid(300);
     //     builders[1].setRevertOnBuild(RevertMode.Revert);
-    //     game.mintAssetTo(builders[2], GOLD_IDX, 200);
+    //     game.mint(builders[2], GOLD_IDX, 200);
     //     builders[2].setBid(200);
     //     (uint8 builderIdx, uint256 bid) = game.__auctionBlock();
     //     assertEq(builderIdx, 2);
@@ -516,7 +560,7 @@ contract GameTest is Test {
     //         type(StateTrackingPlayer).creationCode,
     //         type(StateTrackingPlayer).creationCode
     //     ]));
-    //     game.mintAssetTo(players[1], GOLD_IDX, 1);
+    //     game.mint(players[1], GOLD_IDX, 1);
     //     vm.recordLogs();
     //     game.__auctionBlock();
     //     game.__buildBlock(players[1], 1);
@@ -547,75 +591,75 @@ contract GameTest is Test {
     //     assertEq(player1BuildBlockStateHashes[0], player1BuildBlockStateHashes[1]);
     // }
 
-    // function test_quoteBuy_revertsWithInvalidAsset() external {
-    //     (TestGame game,) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     vm.expectRevert(AssetMarket.InvalidAssetError.selector);
-    //     game.quoteBuy(fromAsset, assetCount, 1);
-    //     vm.expectRevert(AssetMarket.InvalidAssetError.selector);
-    //     game.quoteBuy(assetCount, toAsset, 1);
-    // }
+    function test_quoteBuy_revertsWithInvalidAsset() external {
+        (TestGame game,) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        uint8 assetCount = game.assetCount();
+        uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
+        uint8 toAsset = uint8((fromAsset + 1) % assetCount);
+        vm.expectRevert(AssetMarket.InvalidAssetError.selector);
+        game.quoteBuy(fromAsset, assetCount, 1);
+        vm.expectRevert(AssetMarket.InvalidAssetError.selector);
+        game.quoteBuy(assetCount, toAsset, 1);
+    }
 
-    // function test_quoteSell_revertsWithInvalidAsset() external {
-    //     (TestGame game,) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     vm.expectRevert(AssetMarket.InvalidAssetError.selector);
-    //     game.quoteSell(fromAsset, assetCount, 1);
-    //     vm.expectRevert(AssetMarket.InvalidAssetError.selector);
-    //     game.quoteSell(assetCount, toAsset, 1);
-    // }
+    function test_quoteSell_revertsWithInvalidAsset() external {
+        (TestGame game,) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        uint8 assetCount = game.assetCount();
+        uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
+        uint8 toAsset = uint8((fromAsset + 1) % assetCount);
+        vm.expectRevert(AssetMarket.InvalidAssetError.selector);
+        game.quoteSell(fromAsset, assetCount, 1);
+        vm.expectRevert(AssetMarket.InvalidAssetError.selector);
+        game.quoteSell(assetCount, toAsset, 1);
+    }
 
-    // function test_quoteBuy_cannotBuyEntireReserve() external {
-    //     (TestGame game,) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     uint256[] memory reserves = game.marketState();
-    //     uint256 buyAmount = reserves[toAsset];
-    //     vm.expectRevert(AssetMarket.InsufficientLiquidityError.selector);
-    //     game.quoteBuy(fromAsset, toAsset, buyAmount);
-    // }
+    function test_quoteBuy_cannotBuyEntireReserve() external {
+        (TestGame game,) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        uint8 assetCount = game.assetCount();
+        uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
+        uint8 toAsset = uint8((fromAsset + 1) % assetCount);
+        uint256[] memory reserves = game.marketState();
+        uint256 buyAmount = reserves[toAsset];
+        vm.expectRevert(AssetMarket.InsufficientLiquidityError.selector);
+        game.quoteBuy(fromAsset, toAsset, buyAmount);
+    }
 
-    // function test_quoteBuy_canQuote() external {
-    //     (TestGame game,) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     uint256[] memory reserves = game.marketState();
-    //     uint256 buyAmount = reserves[toAsset] / 2;
-    //     uint256 sellAmount = game.quoteBuy(fromAsset, toAsset, buyAmount);
-    //     assertGe(sellAmount, reserves[fromAsset] * buyAmount / reserves[toAsset]);
-    // }
+    function test_quoteBuy_canQuote() external {
+        (TestGame game,) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        uint8 assetCount = game.assetCount();
+        uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
+        uint8 toAsset = uint8((fromAsset + 1) % assetCount);
+        uint256[] memory reserves = game.marketState();
+        uint256 buyAmount = reserves[toAsset] / 2;
+        uint256 sellAmount = game.quoteBuy(fromAsset, toAsset, buyAmount);
+        assertGe(sellAmount, reserves[fromAsset] * buyAmount / reserves[toAsset]);
+    }
 
-    // function test_quoteSell_canQuote() external {
-    //     (TestGame game,) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     uint256[] memory reserves = game.marketState();
-    //     uint256 sellAmount = reserves[fromAsset] / 2;
-    //     uint256 buyAmount = game.quoteSell(fromAsset, toAsset, sellAmount);
-    //     assertLe(buyAmount, reserves[toAsset] * sellAmount / reserves[fromAsset]);
-    // }
+    function test_quoteSell_canQuote() external {
+        (TestGame game,) = _createGame(T.toDynArray([
+            type(NoopPlayer).creationCode,
+            type(NoopPlayer).creationCode
+        ]));
+        uint8 assetCount = game.assetCount();
+        uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
+        uint8 toAsset = uint8((fromAsset + 1) % assetCount);
+        uint256[] memory reserves = game.marketState();
+        uint256 sellAmount = reserves[fromAsset] / 2;
+        uint256 buyAmount = game.quoteSell(fromAsset, toAsset, sellAmount);
+        assertLe(buyAmount, reserves[toAsset] * sellAmount / reserves[fromAsset]);
+    }
 
     // function test_buy_cannotBeCalledOutsideOfBlock() external {
     //     (TestGame game,) = _createGame(T.toDynArray([
@@ -710,10 +754,10 @@ contract GameTest is Test {
     //     uint8 assetCount = game.assetCount();
     //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
     //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     game.mintAssetTo(players[0], fromAsset, 100);
-    //     game.mintAssetTo(players[0], toAsset, 100);
-    //     game.mintAssetTo(players[1], fromAsset, 100);
-    //     game.mintAssetTo(players[1], toAsset, 100);
+    //     game.mint(players[0], fromAsset, 100);
+    //     game.mint(players[0], toAsset, 100);
+    //     game.mint(players[1], fromAsset, 100);
+    //     game.mint(players[1], toAsset, 100);
     //     uint256 buyAmount = 4;
     //     vm.prank(address(players[0]));
     //     uint256 sellAmount = game.buy(fromAsset, toAsset, buyAmount);
@@ -732,10 +776,10 @@ contract GameTest is Test {
     //     uint8 assetCount = game.assetCount();
     //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
     //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     game.mintAssetTo(players[0], fromAsset, 100);
-    //     game.mintAssetTo(players[0], toAsset, 100);
-    //     game.mintAssetTo(players[1], fromAsset, 100);
-    //     game.mintAssetTo(players[1], toAsset, 100);
+    //     game.mint(players[0], fromAsset, 100);
+    //     game.mint(players[0], toAsset, 100);
+    //     game.mint(players[1], fromAsset, 100);
+    //     game.mint(players[1], toAsset, 100);
     //     uint256 sellAmount = 4;
     //     vm.prank(address(players[0]));
     //     uint256 buyAmount = game.sell(fromAsset, toAsset, sellAmount);
@@ -754,8 +798,8 @@ contract GameTest is Test {
     //     uint8 assetCount = game.assetCount();
     //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
     //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     game.mintAssetTo(players[0], fromAsset, 100);
-    //     game.mintAssetTo(players[0], toAsset, 100);
+    //     game.mint(players[0], fromAsset, 100);
+    //     game.mint(players[0], toAsset, 100);
     //     uint256 buyAmount = game.quoteSell(fromAsset, toAsset, 101);
     //     vm.expectRevert(abi.encodeWithSelector(Game.InsufficientBalanceError.selector, 0, fromAsset));
     //     vm.prank(address(players[0]));
@@ -771,8 +815,8 @@ contract GameTest is Test {
     //     uint8 assetCount = game.assetCount();
     //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
     //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     game.mintAssetTo(players[0], fromAsset, 100);
-    //     game.mintAssetTo(players[0], toAsset, 100);
+    //     game.mint(players[0], fromAsset, 100);
+    //     game.mint(players[0], toAsset, 100);
     //     vm.expectRevert(abi.encodeWithSelector(Game.InsufficientBalanceError.selector, 0, fromAsset));
     //     vm.prank(address(players[0]));
     //     game.sell(fromAsset, toAsset, 101);
@@ -851,12 +895,12 @@ contract TestGame is Game {
         Game(msg.sender, sc2, playerCreationCodes, deploySalts)
     {}
 
-    function mintAssetTo(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) external {
+    function mint(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) external {
         _assertValidPlayerIdx(playerIdx);
         _mint(playerIdx, assetIdx, assetAmount);
     }
 
-    function burnAssetFrom(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) external {
+    function burn(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) external {
         _assertValidPlayerIdx(playerIdx);
         _burn(playerIdx, assetIdx, assetAmount);
     }
@@ -938,7 +982,8 @@ contract NoopPlayer is IPlayer {
     function createBundle(uint8 builderIdx)
         public virtual returns (PlayerBundle memory bundle)
     {
-        emit Turning(builderIdx);
+        emit Bundling(builderIdx);
+        return bundle;
     }
 
     function buildBlock(PlayerBundle[] calldata bundles)
@@ -959,7 +1004,6 @@ contract CallbackPlayer is NoopPlayer {
         bytes4 playerFnSelector,
         address target,
         bytes data,
-        bool succeeded,
         bytes resultData
     );
 
@@ -974,13 +1018,17 @@ contract CallbackPlayer is NoopPlayer {
     function createBundle(uint8 builderIdx)
         public override virtual returns (PlayerBundle memory bundle)
     {
+        super.createBundle(builderIdx);
         _doCalls();
+        return bundle;
     }
 
     function buildBlock(PlayerBundle[] calldata bundles)
         public override virtual returns (uint256 bid)
     {
+        super.buildBlock(bundles);
         _doCalls();
+        return 0;
     }
 
     function _doCalls() private {
@@ -989,7 +1037,10 @@ contract CallbackPlayer is NoopPlayer {
         for (uint256 i; i < n; ++i) {
             Call memory call_ = calls[i];
             (bool success, bytes memory resultData) = call_.target.call(call_.data);
-            emit Called(msg.sig, call_.target, call_.data, success, resultData);
+            if (!success) {
+                resultData.rawRevert();
+            }
+            emit Called(msg.sig, call_.target, call_.data, resultData);
         }
     }
 }
@@ -1003,12 +1054,15 @@ contract StateTrackingPlayer is NoopPlayer {
     function createBundle(uint8 builderIdx)
         public override returns (PlayerBundle memory bundle)
     {
+        super.createBundle(builderIdx);
         emit CreateBundleState(PLAYER_IDX, builderIdx, _getStateHash());
+        return bundle;
     }
 
     function buildBlock(PlayerBundle[] calldata bundles)
         public override returns (uint256)
     {
+        super.buildBlock(bundles);
         emit BuildBlockState(PLAYER_IDX, _getStateHash());
         TestGame game = TestGame(msg.sender);
         for (uint8 i; i < bundles.length; ++i) {
@@ -1040,14 +1094,15 @@ contract TestPlayer is CallbackPlayer {
 
     uint8 public ignoredPlayerIdx = INVALID_PLAYER_IDX;
     uint256 public bid;
+    PlayerBundle _bundle;
 
     constructor(uint8 playerIdx, uint8 playerCount) CallbackPlayer(playerIdx, playerCount) {}
 
     function createBundle(uint8 builderIdx)
         public override returns (PlayerBundle memory bundle)
     {
-        bundle = super.createBundle(builderIdx);
-        TestGame game = TestGame(msg.sender);
+        super.createBundle(builderIdx);
+        return _bundle;
     }
 
     function buildBlock(PlayerBundle[] calldata bundles)
@@ -1060,6 +1115,14 @@ contract TestPlayer is CallbackPlayer {
             game.settleBundle(i, bundles[i]);
         }
         return bid;
+    }
+
+    function setBundle(PlayerBundle memory bundle) external {
+        delete _bundle.swaps;
+        for (uint256 i; i < bundle.swaps.length; ++i) {
+            _bundle.swaps.push(bundle.swaps[i]);
+        }
+        _bundle.builderGoldTip = bundle.builderGoldTip;
     }
    
     function setBid(uint256 bid_) external {
