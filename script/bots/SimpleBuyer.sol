@@ -21,9 +21,7 @@ contract SimpleBuyer is IPlayer {
         uint8 assetCount = game.assetCount();
         bundle.swaps = new SwapSell[](assetCount - 1);
         for (uint8 i; i < bundle.swaps.length; ++i) {
-            uint8 fromAsset = i == TARGET_ASSET
-                ? (i + 1) % assetCount
-                : i;
+            uint8 fromAsset = i >= TARGET_ASSET ? i + 1 : i;
             bundle.swaps[i] = SwapSell({
                 fromAssetIdx: fromAsset,
                 toAssetIdx: TARGET_ASSET,
