@@ -13,8 +13,9 @@ import {
     GOLD_IDX,
     INVALID_PLAYER_IDX,
     INCOME_AMOUNT,
-    BUILD_GAS_BASE,
-    BUILD_GAS_PER_PLAYER
+    PLAYER_BUILD_BLOCK_GAS_BASE,
+    PLAYER_BUILD_BLOCK_GAS_PER_PLAYER,
+    MIN_GAS_PER_BUNDLE_SWAP
 } from "~/game/Game.sol";
 import { AssetMarket } from "~/game/Markets.sol";
 import { IPlayer, PlayerBundle, SwapSell } from "~/game/IPlayer.sol";
@@ -486,7 +487,8 @@ contract GameTest is Test {
             type(TestPlayer).creationCode
         ]));
         uint8 builderIdx = _getRandomPlayerIdx(game);
-        for (uint256 i; i < players.length; ++i) {
+        for (uint8 i; i < players.length; ++i) {
+            game.mint(i, GOLD_IDX, 101);
             TestPlayer(address(players[i])).setBid(100);
         }
         TestPlayer(address(players[builderIdx])).setBid(101);
@@ -495,83 +497,260 @@ contract GameTest is Test {
         assertEq(bid, 101);
     }
 
-    // function test_auctionBlock_returnsSecondHighestBidderIfHighestReverts() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(TestPlayer).creationCode,
-    //         type(TestPlayer).creationCode,
-    //         type(TestPlayer).creationCode
-    //     ]));
-    //     TestPlayer[] memory builders;
-    //     assembly ("memory-safe") { builders := players }
-    //     game.mint(builders[0], GOLD_IDX, 100);
-    //     builders[0].setBid(100);
-    //     game.mint(builders[1], GOLD_IDX, 300);
-    //     builders[1].setBid(300);
-    //     builders[1].setRevertOnBuild(RevertMode.Revert);
-    //     game.mint(builders[2], GOLD_IDX, 200);
-    //     builders[2].setBid(200);
-    //     (uint8 builderIdx, uint256 bid) = game.__auctionBlock();
-    //     assertEq(builderIdx, 2);
-    //     assertEq(bid, 200);
-    // }
+    function test_auctionBlock_ignoresRevertingBidder() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        for (uint8 i; i < players.length; ++i) {
+            uint256 bid = 100 + i;
+            game.mint(i, GOLD_IDX, bid);
+            TestPlayer(address(players[i])).setBid(bid);
+        }
+        TestPlayer(address(players[2])).addCallback(
+            IPlayer.buildBlock.selector,
+            address(this),
+            abi.encodeCall(this.revertBack, ('oops'))
+        );
+        (uint8 builderIdx_, uint256 bid_) = game.__auctionBlock();
+        assertEq(builderIdx_, 1);
+        assertEq(bid_, 101);
+    }
 
-    // function test_auctionBlock_returnsZeroIfNoOneBids() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(TestPlayer).creationCode,
-    //         type(TestPlayer).creationCode,
-    //         type(TestPlayer).creationCode
-    //     ]));
-    //     TestPlayer[] memory builders;
-    //     assembly ("memory-safe") { builders := players }
-    //     (uint8 builderIdx, uint256 bid) = game.__auctionBlock();
-    //     assertEq(builderIdx, 0);
-    //     assertEq(bid, 0);
-    // }
+    function test_auctionBlock_ignoresInsufficientFundsBidder() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        for (uint8 i; i < players.length; ++i) {
+            uint256 bid = 100 + i;
+            game.mint(i, GOLD_IDX, bid);
+            TestPlayer(address(players[i])).setBid(bid);
+        }
+        game.burn(2, GOLD_IDX, 1);
+        (uint8 builderIdx_, uint256 bid_) = game.__auctionBlock();
+        assertEq(builderIdx_, 1);
+        assertEq(bid_, 101);
+    }
 
-    // function test_auctionBlock_returnsZeroIfEveryoneReverts() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(TestPlayer).creationCode,
-    //         type(TestPlayer).creationCode,
-    //         type(TestPlayer).creationCode
-    //     ]));
-    //     TestPlayer[] memory builders;
-    //     assembly ("memory-safe") { builders := players }
-    //     builders[0].setRevertOnBuild(RevertMode.Revert);
-    //     builders[1].setRevertOnBuild(RevertMode.Revert);
-    //     builders[2].setRevertOnBuild(RevertMode.Revert);
-    //     (uint8 builderIdx, uint256 bid) = game.__auctionBlock();
-    //     assertEq(builderIdx, 0);
-    //     assertEq(bid, 0);
-    // }
+    function test_auctionBlock_returnsInvalidPlayerIfNoOneBids() external {
+        (TestGame game,) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        (uint8 builderIdx, uint256 bid) = game.__auctionBlock();
+        assertEq(builderIdx, INVALID_PLAYER_IDX);
+        assertEq(bid, 0);
+    }
 
-    // function test_grantTurn_cannotBeCalledByNonBuilderDuringDefaultBlock() external {
-    //     (TestGame game,) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(CallbackPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     vm.expectEmit(true, true, true, true);
-    //     // This will actually trigger a MinGasError because the turn gas lower than what
-    //     // grantTurn() requires.
-    //     // emit Game.PlayerTurnFailed(1, abi.encodeWithSelector(Game.AccessError.selector));
-    //     emit Game.PlayerTurnFailed(1, abi.encodeWithSelector(Game.MinGasError.selector));
-    //     vm.expectEmit(true, true, true, true);
-    //     emit Game.DefaultBlockBuilt(0);
-    //     game.__buildBlock(NULL_PLAYER, 0);
-    // }
+    function test_settleBundle_cannotBeCalledByNonBuilderDuringBlock() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        uint8 nonBuilderIdx = uint8((builderIdx + 1) % players.length);
+        // Builder will call another player directly who will try to settle a bundle.
+        TestPlayer(address(players[builderIdx])).addCallback(
+            IPlayer.buildBlock.selector,
+            address(players[nonBuilderIdx]),
+            abi.encodeCall(CallbackPlayer.poke, ())
+        );
+        TestPlayer(address(players[nonBuilderIdx])).addCallback(
+            CallbackPlayer.poke.selector,
+            address(game),
+            abi.encodeCall(Game.settleBundle, (0, PlayerBundle(new SwapSell[](0), 0)))
+        );
+        vm.expectRevert(abi.encodeWithSelector(
+            Game.BuildBlockFailedError.selector,
+            builderIdx,
+            abi.encodeWithSelector(Game.AccessError.selector)
+        ));
+        game.__buildPlayerBlock(builderIdx);
+    }
     
-    // function test_grantTurn_succeedsWithWarningIfPlayerFails() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(TestPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     TestPlayer(address(players[0])).setRevertOnTurn(RevertMode.Revert);
-    //     game.setCurrentBuilder(players[1]);
-    //     vm.expectEmit(true, true, true, true);
-    //     emit Game.PlayerTurnFailed(0, abi.encodeWithSelector(TestError.selector));
-    //     vm.prank(address(players[1]));
-    //     game.grantTurn(0);
-    // }
+    function test_settleBundle_succeedsIfBundleFails() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        uint8 playerIdx = uint8((builderIdx + 1) % players.length);
+        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1), 0);
+        bundle.swaps[0] = SwapSell({
+            fromAssetIdx: 0,
+            toAssetIdx: 1,
+            fromAmount: 1e18,
+            minToAmount: type(uint256).max
+        });
+        game.setCurrentBuilder(builderIdx);
+        vm.expectEmit(true, true, true, true);
+        emit Game.BundleSettled(playerIdx, false, bundle);
+        vm.prank(address(players[builderIdx]));
+        game.settleBundle(playerIdx, bundle);
+    }
+    
+    function test_settleBundle_failsIfNotEnoughGas() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        uint8 playerIdx = uint8((builderIdx + 1) % players.length);
+        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1), 0);
+        bundle.swaps[0] = SwapSell({
+            fromAssetIdx: 0,
+            toAssetIdx: 1,
+            fromAmount: 1e18,
+            minToAmount: type(uint256).max
+        });
+        game.setCurrentBuilder(builderIdx);
+        vm.expectRevert(abi.encodeWithSelector(Game.InsufficientBundleGasError.selector));
+        vm.prank(address(players[builderIdx]));
+        game.settleBundle{gas: MIN_GAS_PER_BUNDLE_SWAP * bundle.swaps.length + 2e3}(playerIdx, bundle);
+    }
+
+    function test_settleBundle_failsIfSameBundleAlreadySettled() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        uint8 playerIdx = uint8((builderIdx + 1) % players.length);
+        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1), 0);
+        bundle.swaps[0] = SwapSell({
+            fromAssetIdx: 0,
+            toAssetIdx: 1,
+            fromAmount: 1e18,
+            minToAmount: type(uint256).max
+        });
+        game.setCurrentBuilder(builderIdx);
+        vm.expectEmit(true, true, true, true);
+        emit Game.BundleSettled(playerIdx, false, bundle);
+        vm.prank(address(players[builderIdx]));
+        game.settleBundle(playerIdx, bundle);
+        vm.expectRevert(abi.encodeWithSelector(
+            Game.BundleAlreadySettledError.selector,
+            playerIdx
+        ));
+        vm.prank(address(players[builderIdx]));
+        game.settleBundle(playerIdx, bundle);
+    }
+
+    function test_settleBundle_failsIfDifferentBundleButSamePlayerAlreadySettled() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        uint8 playerIdx = uint8((builderIdx + 1) % players.length);
+        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1), 0);
+        bundle.swaps[0] = SwapSell({
+            fromAssetIdx: 0,
+            toAssetIdx: 1,
+            fromAmount: 1e18,
+            minToAmount: type(uint256).max
+        });
+        game.setCurrentBuilder(builderIdx);
+        vm.expectEmit(true, true, true, true);
+        emit Game.BundleSettled(playerIdx, false, bundle);
+        vm.prank(address(players[builderIdx]));
+        game.settleBundle(playerIdx, bundle);
+        bundle.builderGoldTip = 1;
+        vm.expectRevert(abi.encodeWithSelector(
+            Game.BundleAlreadySettledError.selector,
+            playerIdx
+        ));
+        vm.prank(address(players[builderIdx]));
+        game.settleBundle(playerIdx, bundle);
+    }
+
+    function test_settleBundle_failsIfSlippageIsTooHigh() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        uint8 playerIdx = uint8((builderIdx + 1) % players.length);
+        game.mint(playerIdx, GOLD_IDX, 1e18);
+        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1), 0);
+        bundle.swaps[0] = SwapSell({
+            fromAssetIdx: 0,
+            toAssetIdx: 1,
+            fromAmount: 1e18,
+            minToAmount: type(uint256).max
+        });
+        game.mint(playerIdx, 0, 1e18);
+        game.setCurrentBuilder(builderIdx);
+        vm.expectEmit(true, true, true, true);
+        emit Game.BundleSettled(playerIdx, false, bundle);
+        vm.prank(address(players[builderIdx]));
+        game.settleBundle(playerIdx, bundle);
+    }
+
+    function test_settleBundle_canSwap() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        uint8 playerIdx = uint8((builderIdx + 1) % players.length);
+        game.mint(playerIdx, GOLD_IDX, 1e18);
+        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1), 0);
+        bundle.swaps[0] = SwapSell({
+            fromAssetIdx: 0,
+            toAssetIdx: 1,
+            fromAmount: 1e18,
+            minToAmount: 1
+        });
+        game.mint(playerIdx, 0, 1e18);
+        game.setCurrentBuilder(builderIdx);
+        uint256 toAmount = game.quoteSell(0, 1, 1e18);
+        vm.expectEmit(true, true, true, true);
+        emit Game.Swap(playerIdx, 0, 1, 1e18, toAmount);
+        vm.expectEmit(true, true, true, true);
+        emit Game.BundleSettled(playerIdx, true, bundle);
+        vm.prank(address(players[builderIdx]));
+        game.settleBundle(playerIdx, bundle);
+    }
+
+    function test_settleBundle_canTip() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        uint8 playerIdx = uint8((builderIdx + 1) % players.length);
+        game.mint(playerIdx, GOLD_IDX, 1e18);
+        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](0), 1e18);
+        game.setCurrentBuilder(builderIdx);
+        vm.expectEmit(true, true, true, true);
+        emit Game.BundleSettled(playerIdx, true, bundle);
+        vm.prank(address(players[builderIdx]));
+        game.settleBundle(playerIdx, bundle);
+        assertEq(game.balanceOf(builderIdx, GOLD_IDX), 1e18);
+        assertEq(game.balanceOf(playerIdx, GOLD_IDX), 0);
+    }
+
+    function test_settleBundle_failsIfNotEnoughTip() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        uint8 playerIdx = uint8((builderIdx + 1) % players.length);
+        game.mint(playerIdx, GOLD_IDX, 1e18);
+        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](0), 1e18 + 1);
+        game.setCurrentBuilder(builderIdx);
+        vm.prank(address(players[builderIdx]));
+        vm.expectEmit(true, true, true, true);
+        emit Game.BundleSettled(playerIdx, false, bundle);
+        game.settleBundle(playerIdx, bundle);
+    }
 
     function test_sameStateForPlayersDuringBlockAuctionAndBuilding() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
@@ -684,166 +863,121 @@ contract GameTest is Test {
         assertLe(buyAmount, reserves[toAsset] * sellAmount / reserves[fromAsset]);
     }
 
-    // function test_buy_cannotBeCalledOutsideOfBlock() external {
-    //     (TestGame game,) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     vm.expectRevert(Game.DuringBlockError.selector);
-    //     game.buy(fromAsset, toAsset, 1);
-    // }
+    function test_buy_cannotBeCalledByNonBuilder() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        uint8 nonBuilderIdx = uint8((builderIdx + 1) % players.length);
+        game.setCurrentBuilder(builderIdx);
+        vm.expectRevert(abi.encodeWithSelector(Game.AccessError.selector));
+        vm.prank(address(players[nonBuilderIdx]));
+        game.buy(0, 1, 0);
+    }
 
-    // function test_sell_cannotBeCalledOutsideOfBlock() external {
-    //     (TestGame game,) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     vm.expectRevert(Game.DuringBlockError.selector);
-    //     game.sell(fromAsset, toAsset, 1);
-    // }
+    function test_sell_cannotBeCalledByNonBuilder() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        uint8 nonBuilderIdx = uint8((builderIdx + 1) % players.length);
+        game.setCurrentBuilder(builderIdx);
+        vm.expectRevert(abi.encodeWithSelector(Game.AccessError.selector));
+        vm.prank(address(players[nonBuilderIdx]));
+        game.sell(0, 1, 0);
+    }
 
-    // function test_buy_mustBeCalledByPlayer() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     game.setCurrentBuilder(players[1]);
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     vm.expectRevert(Game.InvalidPlayerError.selector);
-    //     game.buy(fromAsset, toAsset, 1);
-    // }
+    function test_buy_performsSwap() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        game.setCurrentBuilder(builderIdx);
+        game.mint(builderIdx, GOLD_IDX, 1e18);
+        uint256 toAmount = 1e17;
+        uint256 fromAmount = game.quoteBuy(GOLD_IDX, GOLD_IDX + 1, toAmount);
+        assertGt(fromAmount, 0);
+        vm.expectEmit(true, true, true, true);
+        emit Game.Burn(builderIdx, GOLD_IDX, fromAmount);
+        vm.expectEmit(true, true, true, true);
+        emit Game.Mint(builderIdx, GOLD_IDX + 1, toAmount);
+        vm.expectEmit(true, true, true, true);
+        emit Game.Swap(builderIdx, GOLD_IDX, GOLD_IDX + 1, fromAmount, toAmount);
+        vm.prank(address(players[builderIdx]));
+        game.buy(GOLD_IDX, GOLD_IDX + 1, toAmount);
+        assertEq(game.balanceOf(builderIdx, GOLD_IDX), 1e18 - fromAmount);
+        assertEq(game.balanceOf(builderIdx, GOLD_IDX + 1), toAmount);
+    }
 
-    // function test_sell_mustBeCalledByPlayer() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     game.setCurrentBuilder(players[1]);
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     vm.expectRevert(Game.InvalidPlayerError.selector);
-    //     game.sell(fromAsset, toAsset, 1);
-    // }
+    function test_sell_performsSwap() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        game.setCurrentBuilder(builderIdx);
+        game.mint(builderIdx, GOLD_IDX, 1e18);
+        uint256 fromAmount = 1e17;
+        uint256 toAmount = game.quoteSell(GOLD_IDX, GOLD_IDX + 1, fromAmount);
+        assertGt(toAmount, 0);
+        vm.expectEmit(true, true, true, true);
+        emit Game.Burn(builderIdx, GOLD_IDX, fromAmount);
+        vm.expectEmit(true, true, true, true);
+        emit Game.Mint(builderIdx, GOLD_IDX + 1, toAmount);
+        vm.expectEmit(true, true, true, true);
+        emit Game.Swap(builderIdx, GOLD_IDX, GOLD_IDX + 1, fromAmount, toAmount);
+        vm.prank(address(players[builderIdx]));
+        game.sell(GOLD_IDX, GOLD_IDX + 1, fromAmount);
+        assertEq(game.balanceOf(builderIdx, GOLD_IDX), 1e18 - fromAmount);
+        assertEq(game.balanceOf(builderIdx, GOLD_IDX + 1), toAmount);
+    }
 
-    // function test_buy_revertsWithInvalidAsset() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     game.setCurrentBuilder(players[1]);
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     vm.expectRevert(AssetMarket.InvalidAssetError.selector);
-    //     vm.prank(address(players[0]));
-    //     game.buy(assetCount, toAsset, 1);
-    //     vm.expectRevert(AssetMarket.InvalidAssetError.selector);
-    //     vm.prank(address(players[0]));
-    //     game.buy(fromAsset, assetCount, 1);
-    // }
+    function test_buy_failsIfSellingMoreThanBalance() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        game.setCurrentBuilder(builderIdx);
+        game.mint(builderIdx, GOLD_IDX, 1);
+        uint256 toAmount = 1e17;
+        uint256 fromAmount = game.quoteBuy(GOLD_IDX, GOLD_IDX + 1, toAmount);
+        assertGt(fromAmount, game.balanceOf(builderIdx, GOLD_IDX));
+        vm.expectRevert(abi.encodeWithSelector(
+            Game.InsufficientBalanceError.selector,
+            builderIdx,
+            GOLD_IDX
+        ));
+        vm.prank(address(players[builderIdx]));
+        game.buy(GOLD_IDX, GOLD_IDX + 1, toAmount);
+    }
 
-    // function test_sell_revertsWithInvalidAsset() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     game.setCurrentBuilder(players[1]);
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     vm.expectRevert(AssetMarket.InvalidAssetError.selector);
-    //     vm.prank(address(players[0]));
-    //     game.sell(assetCount, toAsset, 1);
-    //     vm.expectRevert(AssetMarket.InvalidAssetError.selector);
-    //     vm.prank(address(players[0]));
-    //     game.sell(fromAsset, assetCount, 1);
-    // }
-
-    // function test_buy_adjustsBalances() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     game.setCurrentBuilder(players[1]);
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     game.mint(players[0], fromAsset, 100);
-    //     game.mint(players[0], toAsset, 100);
-    //     game.mint(players[1], fromAsset, 100);
-    //     game.mint(players[1], toAsset, 100);
-    //     uint256 buyAmount = 4;
-    //     vm.prank(address(players[0]));
-    //     uint256 sellAmount = game.buy(fromAsset, toAsset, buyAmount);
-    //     assertEq(game.balanceOf(0, fromAsset), 100 - sellAmount);
-    //     assertEq(game.balanceOf(0, toAsset), 100 + buyAmount);
-    //     assertEq(game.balanceOf(1, fromAsset), 100);
-    //     assertEq(game.balanceOf(1, toAsset), 100);
-    // }
-
-    // function test_sell_adjustBalances() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     game.setCurrentBuilder(players[1]);
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     game.mint(players[0], fromAsset, 100);
-    //     game.mint(players[0], toAsset, 100);
-    //     game.mint(players[1], fromAsset, 100);
-    //     game.mint(players[1], toAsset, 100);
-    //     uint256 sellAmount = 4;
-    //     vm.prank(address(players[0]));
-    //     uint256 buyAmount = game.sell(fromAsset, toAsset, sellAmount);
-    //     assertEq(game.balanceOf(0, fromAsset), 100 - sellAmount);
-    //     assertEq(game.balanceOf(0, toAsset), 100 + buyAmount);
-    //     assertEq(game.balanceOf(1, fromAsset), 100);
-    //     assertEq(game.balanceOf(1, toAsset), 100);
-    // }
-
-    // function test_buy_cannotSellMoreThanCallerBalance() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     game.setCurrentBuilder(players[1]);
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     game.mint(players[0], fromAsset, 100);
-    //     game.mint(players[0], toAsset, 100);
-    //     uint256 buyAmount = game.quoteSell(fromAsset, toAsset, 101);
-    //     vm.expectRevert(abi.encodeWithSelector(Game.InsufficientBalanceError.selector, 0, fromAsset));
-    //     vm.prank(address(players[0]));
-    //     game.buy(fromAsset, toAsset, buyAmount);
-    // }
-
-    // function test_sell_cannotSellMoreThanCallerBalance() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(NoopPlayer).creationCode
-    //     ]));
-    //     game.setCurrentBuilder(players[1]);
-    //     uint8 assetCount = game.assetCount();
-    //     uint8 fromAsset = uint8((assetCount + T.randomUint256()) % assetCount);
-    //     uint8 toAsset = uint8((fromAsset + 1) % assetCount);
-    //     game.mint(players[0], fromAsset, 100);
-    //     game.mint(players[0], toAsset, 100);
-    //     vm.expectRevert(abi.encodeWithSelector(Game.InsufficientBalanceError.selector, 0, fromAsset));
-    //     vm.prank(address(players[0]));
-    //     game.sell(fromAsset, toAsset, 101);
-    // }
+    function test_sell_failsIfSellingMoreThanBalance() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        game.setCurrentBuilder(builderIdx);
+        game.mint(builderIdx, GOLD_IDX, 1);
+        uint256 fromAmount = 2;
+        vm.expectRevert(abi.encodeWithSelector(
+            Game.InsufficientBalanceError.selector,
+            builderIdx,
+            GOLD_IDX
+        ));
+        vm.prank(address(players[builderIdx]));
+        game.sell(GOLD_IDX, GOLD_IDX + 1, fromAmount);
+    }
 
     function _createGame(bytes[] memory playerCreationCodes)
         private returns (TestGame game, IPlayer[] memory players)
@@ -1058,6 +1192,10 @@ contract CallbackPlayer is NoopPlayer {
         super.buildBlock(bundles);
         _doCalls();
         return 0;
+    }
+
+    function poke() external {
+        _doCalls();
     }
 
     function _doCalls() private {

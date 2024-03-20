@@ -19,10 +19,10 @@ uint256 constant MARKET_STARTING_GOLD_PER_PLAYER = 32e18;
 uint256 constant MARKET_STARTING_GOODS_PER_PLAYER = 32e18;
 uint8 constant INVALID_PLAYER_IDX = type(uint8).max;
 uint256 constant MAX_CREATION_GAS = 200 * 0x8000 + 1e6;
-uint256 constant TURN_GAS_BASE = 1e6;
-uint256 constant TURN_GAS_PER_PLAYER = 500e3;
-uint256 constant BUILD_GAS_BASE = 4e6;
-uint256 constant BUILD_GAS_PER_PLAYER = 1e6;
+uint256 constant PLAYER_CREATE_BUNDLE_GAS_BASE = 1e6;
+uint256 constant PLAYER_CREATE_BUNDLE_GAS_PER_PLAYER = 500e3;
+uint256 constant PLAYER_BUILD_BLOCK_GAS_BASE = 2e6;
+uint256 constant PLAYER_BUILD_BLOCK_GAS_PER_PLAYER = 1e6;
 uint256 constant MAX_RETURN_DATA_SIZE = 1024;
 uint256 constant INCOME_AMOUNT = 1e18;
 uint256 constant MIN_GAS_PER_BUNDLE_SWAP = 50e3;
@@ -425,7 +425,7 @@ contract Game is AssetMarket {
         (success, resultData) = address(builder).safeCall(
             abi.encodeCall(IPlayer.buildBlock, (bundles)),
             false,
-            BUILD_GAS_BASE + BUILD_GAS_PER_PLAYER * playerCount,
+            PLAYER_BUILD_BLOCK_GAS_BASE + PLAYER_BUILD_BLOCK_GAS_PER_PLAYER * playerCount,
             MAX_RETURN_DATA_SIZE
         );
         if (!success || resultData.length != 32) {
@@ -442,7 +442,7 @@ contract Game is AssetMarket {
         (bool success, bytes memory resultData) = address(player).safeCall(
             abi.encodeCall(IPlayer.createBundle, (builderIdx)),
             false,
-            TURN_GAS_BASE + TURN_GAS_PER_PLAYER * playerCount,
+            PLAYER_CREATE_BUNDLE_GAS_BASE + PLAYER_CREATE_BUNDLE_GAS_PER_PLAYER * playerCount,
             MAX_RETURN_DATA_SIZE
         );
         if (!success) {
@@ -473,7 +473,7 @@ contract Game is AssetMarket {
 
     function _buildBlock() internal {
         (uint8 builderIdx, uint256 builderBid) = _auctionBlock();
-        if (builderBid != 0) {
+        if (builderIdx != INVALID_PLAYER_IDX) {
             assert(_buildPlayerBlock(builderIdx) == builderBid);
             lastWinningBid = builderBid;
             emit BlockBuilt(_round, builderIdx, builderBid);
