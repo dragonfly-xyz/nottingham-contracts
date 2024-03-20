@@ -271,7 +271,7 @@ contract Game is AssetMarket {
         if (gasleft() < MIN_GAS_PER_BUNDLE_SWAP * bundle.swaps.length + 2e3) {
             revert InsufficientBundleGasError();
         }
-        try this.selfSettleBundle(playerIdx, bundle) {
+        try this.selfSettleBundle(playerIdx, getIndexFromPlayer(_builder), bundle) {
             success = true;
         } catch {}
         emit BundleSettled(playerIdx, success, bundle);
@@ -279,7 +279,7 @@ contract Game is AssetMarket {
     }
 
     // Only called by settle().
-    function selfSettleBundle(uint8 playerIdx, PlayerBundle memory bundle)
+    function selfSettleBundle(uint8 playerIdx, uint8 builderIdx, PlayerBundle memory bundle)
         external onlySelf
     {
         for (uint256 i; i < bundle.swaps.length; ++i) {
@@ -290,7 +290,7 @@ contract Game is AssetMarket {
             }
         }
         if (bundle.builderGoldTip != 0) {
-            _transfer(playerIdx, getIndexFromPlayer(IPlayer(msg.sender)), GOLD_IDX, bundle.builderGoldTip);
+            _transfer(playerIdx, builderIdx, GOLD_IDX, bundle.builderGoldTip);
         }
     }
 

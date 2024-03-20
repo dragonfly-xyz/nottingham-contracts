@@ -31,7 +31,7 @@ error TestError();
 
 uint8 constant MOCK_UNSET_PLAYER_IDX = INVALID_PLAYER_IDX - 1;
 bytes32 constant CREATE_BUNDLE_STATE_EVENT_SIGNATURE = keccak256('CreateBundleState(uint8,uint8,bytes32)');
-bytes32 constant BUILD_BLOCK_EVENT_SIGNATURE = keccak256('BuildBlockState(uint8,bytes32)');
+bytes32 constant BUILD_BLOCK_STATE_EVENT_SIGNATURE = keccak256('BuildBlockState(uint8,bytes32)');
 
 function isAddressCold(address addr) view returns (bool isCold) {
     assembly ("memory-safe") {
@@ -364,6 +364,30 @@ contract GameTest is Test {
         game.__buildPlayerBlock(builderIdx);
     }
 
+    function test_buildPlayerBlock_failsIfBuilderSettlesDifferentBundle() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        uint8 replacedPlayerIdx = uint8((builderIdx + 1) % game.playerCount());
+        TestPlayer builder = TestPlayer(address(players[builderIdx]));
+        game.mint(replacedPlayerIdx, GOLD_IDX, 1337);
+        builder.ignorePlayer(replacedPlayerIdx);
+        // Call settleBundle() call for replacedPlayerIdx with the wrong bundle.
+        builder.addCallback(IPlayer.buildBlock.selector, address(game), abi.encodeCall(
+            Game.settleBundle,
+            (replacedPlayerIdx, PlayerBundle(new SwapSell[](0), 1337))
+        ));
+        vm.expectRevert(abi.encodeWithSelector(
+            Game.BundleNotSettledError.selector,
+            builderIdx,
+            replacedPlayerIdx
+        ));
+        game.__buildPlayerBlock(builderIdx);
+    }
+
     function test_buildPlayerBlock_failsIfBuilderFails() external {
         (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
             type(TestPlayer).creationCode,
@@ -419,63 +443,57 @@ contract GameTest is Test {
         game.__buildPlayerBlock(builderIdx);
     }
 
-    // function test_buildPlayerBlock_succeedsIfBuilderDoesHaveFundsAtTheEndOfBlock() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(TestPlayer).creationCode
-    //     ]));
-    //     TestPlayer builder = TestPlayer(address(players[1]));
-    //     builder.setBid(1337);
-    //     builder.addMintOnTurn(builder, GOLD_IDX, 1338);
-    //     game.__buildPlayerBlock(builder);
-    //     assertEq(game.balanceOf(1, GOLD_IDX), 1); // 1337 of 1338 is burned.
-    // }
+    function test_buildPlayerBlock_burnsBid() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        TestPlayer builder = TestPlayer(address(players[builderIdx]));
+        builder.setBid(1337);
+        // Mint 1338 gold on build.
+        builder.addCallback(
+            IPlayer.buildBlock.selector,
+            address(game),
+            abi.encodeCall(TestGame.mint, (builderIdx, GOLD_IDX, 1338))
+        );
+        game.__buildPlayerBlock(builderIdx);
+        assertEq(game.balanceOf(builderIdx, GOLD_IDX), 1); // 1337 of 1338 is burned.
+    }
 
-    // function test_buildPlayerBlock_doesNotConsumeAllGasIfBuilderExplodesDuringBuild() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(NoopPlayer).creationCode,
-    //         type(TestPlayer).creationCode
-    //     ]));
-    //     TestPlayer builder = TestPlayer(address(players[1]));
-    //     builder.setBid(1337);
-    //     builder.setRevertOnBuild(RevertMode.Invalid);
-    //     vm.expectRevert(abi.encodeWithSelector(
-    //         Game.PlayerBuildBlockFailedError.selector,
-    //         1,
-    //         ""
-    //     ));
-    //     uint256 gasUsed = gasleft();
-    //     game.__buildPlayerBlock(builder);
-    //     gasUsed -= gasleft();
-    //     assertApproxEqAbs(gasUsed, BUILD_GAS_BASE, 32e3);
-    // }
-   
-    // function test_buildPlayerBlock_revertingPlayerCountsAsIncluded() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(RevertingPlayer).creationCode,
-    //         type(TestPlayer).creationCode
-    //     ]));
-    //     game.__buildPlayerBlock(players[1]);
-    // }
+    function test_buildPlayerBlock_receivesPlayerBundles() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = 0;
+        TestPlayer builder = TestPlayer(address(players[builderIdx]));
+        PlayerBundle[] memory bundles = new PlayerBundle[](players.length);
+        bundles[1].builderGoldTip = 1337;
+        bundles[2].builderGoldTip = 1338;
+        TestPlayer(address(players[1])).setBundle(bundles[1]);
+        TestPlayer(address(players[2])).setBundle(bundles[2]);
+        vm.expectEmit(true, true, true, true, address(builder));
+        emit Building(bundles);
+        game.__buildPlayerBlock(builderIdx);
+    }
 
-    // function test_auctionBlock_returnsHighestBidder() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(TestPlayer).creationCode,
-    //         type(TestPlayer).creationCode,
-    //         type(TestPlayer).creationCode
-    //     ]));
-    //     TestPlayer[] memory builders;
-    //     assembly ("memory-safe") { builders := players }
-    //     game.mint(builders[0], GOLD_IDX, 100);
-    //     builders[0].setBid(100);
-    //     game.mint(builders[1], GOLD_IDX, 300);
-    //     builders[1].setBid(300);
-    //     game.mint(builders[2], GOLD_IDX, 200);
-    //     builders[2].setBid(200);
-    //     (uint8 builderIdx, uint256 bid) = game.__auctionBlock();
-    //     assertEq(builderIdx, 1);
-    //     assertEq(bid, 300);
-    // }
+    function test_auctionBlock_returnsHighestBidder() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode,
+            type(TestPlayer).creationCode
+        ]));
+        uint8 builderIdx = _getRandomPlayerIdx(game);
+        for (uint256 i; i < players.length; ++i) {
+            TestPlayer(address(players[i])).setBid(100);
+        }
+        TestPlayer(address(players[builderIdx])).setBid(101);
+        (uint8 builderIdx_, uint256 bid) = game.__auctionBlock();
+        assertEq(builderIdx_, builderIdx);
+        assertEq(bid, 101);
+    }
 
     // function test_auctionBlock_returnsSecondHighestBidderIfHighestReverts() external {
     //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
@@ -555,41 +573,46 @@ contract GameTest is Test {
     //     game.grantTurn(0);
     // }
 
-    // function test_sameStateForPlayersDuringBlockAuctionAndBuilding() external {
-    //     (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-    //         type(StateTrackingPlayer).creationCode,
-    //         type(StateTrackingPlayer).creationCode
-    //     ]));
-    //     game.mint(players[1], GOLD_IDX, 1);
-    //     vm.recordLogs();
-    //     game.__auctionBlock();
-    //     game.__buildBlock(players[1], 1);
-    //     Vm.Log[] memory logs = vm.getRecordedLogs();
-    //     // There should be 2 matching emits from turn() from player 0 and from buildBlock() from player 1.
-    //     bytes32[2] memory player0TurnStateHashes;
-    //     bytes32[2] memory player1BuildBlockStateHashes;
-    //     uint256 player0TurnStateHashesLen;
-    //     uint256 player1BuildBlockStateHashesLen;
-    //     for (uint256 i; i < logs.length; ++i) {
-    //         Vm.Log memory log = logs[i];
-    //         if (log.topics[0] == BUILD_BLOCK_EVENT_SIGNATURE) {
-    //             (uint8 playerIdx, bytes32 h) = abi.decode(log.data, (uint8, bytes32));
-    //             if (playerIdx == 1) {
-    //                 player1BuildBlockStateHashes[player1BuildBlockStateHashesLen++] = h;
-    //             }
-    //         } else if (log.topics[0] == CREATE_BUNDLE_STATE_EVENT_SIGNATURE) {
-    //             (uint8 playerIdx, uint8 builderIdx, bytes32 h) =
-    //                 abi.decode(log.data, (uint8, uint8, bytes32));
-    //             if (playerIdx == 0 && builderIdx == 1) {
-    //                 player0TurnStateHashes[player0TurnStateHashesLen++] = h;
-    //             }
-    //         }
-    //     }
-    //     assertEq(player0TurnStateHashesLen, player0TurnStateHashes.length);
-    //     assertEq(player1BuildBlockStateHashesLen, player1BuildBlockStateHashes.length);
-    //     assertEq(player0TurnStateHashes[0], player0TurnStateHashes[1]);
-    //     assertEq(player1BuildBlockStateHashes[0], player1BuildBlockStateHashes[1]);
-    // }
+    function test_sameStateForPlayersDuringBlockAuctionAndBuilding() external {
+        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
+            type(StateTrackingPlayer).creationCode,
+            type(StateTrackingPlayer).creationCode
+        ]));
+        uint8 playerIdx = 0;
+        uint8 builderIdx = 1;
+        StateTrackingPlayer player = StateTrackingPlayer(address(players[playerIdx]));
+        StateTrackingPlayer builder = StateTrackingPlayer(address(players[builderIdx]));
+        bytes32 playerCreateBundleStateHash;
+        bytes32 builderBuildBlockStateHash;
+        
+        vm.recordLogs();
+        game.__auctionBlock();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; ++i) {
+            Vm.Log memory log = logs[i];
+            bytes32 sig = log.topics[0];
+            if (log.emitter == address(player) && sig == CREATE_BUNDLE_STATE_EVENT_SIGNATURE) {
+                (uint8 playerIdx_, uint8 builderIdx_, bytes32 h) =
+                    abi.decode(log.data, (uint8, uint8, bytes32));
+                assertEq(playerIdx_, playerIdx, 'createBundle() playerIdx');
+                assertEq(builderIdx_, builderIdx, 'createBundle() builderIdx');
+                playerCreateBundleStateHash = h;
+            } else if (log.emitter == address(builder) && sig == BUILD_BLOCK_STATE_EVENT_SIGNATURE) {
+                (uint8 builderIdx_, bytes32 h) =
+                    abi.decode(log.data, (uint8, bytes32));
+                assertEq(builderIdx_, builderIdx, 'buildBlock() builderIdx');
+                builderBuildBlockStateHash = h;
+            }
+        }
+        assertTrue(playerCreateBundleStateHash != 0, 'playerCreateBundleStateHash != 0');
+        assertTrue(builderBuildBlockStateHash != 0, 'builderBuildBlockStateHash != 0');
+
+        vm.expectEmit(true, true, true, true, address(player));
+        emit StateTrackingPlayer.CreateBundleState(playerIdx, builderIdx, playerCreateBundleStateHash);
+        vm.expectEmit(true, true, true, true, address(builder));
+        emit StateTrackingPlayer.BuildBlockState(builderIdx, builderBuildBlockStateHash);
+        game.__buildPlayerBlock(builderIdx);
+    }
 
     function test_quoteBuy_revertsWithInvalidAsset() external {
         (TestGame game,) = _createGame(T.toDynArray([
@@ -940,6 +963,12 @@ contract TestGame is Game {
         return _buildBlock();
     }
 
+    function __auctionBlock()
+        external returns (uint8 builderIdx, uint256 builderBid)
+    {
+        return _auctionBlock();
+    }
+
     function _auctionBlock()
         internal override returns (uint8 builderIdx, uint256 builderBid)
     {
@@ -1068,7 +1097,7 @@ contract StateTrackingPlayer is NoopPlayer {
         for (uint8 i; i < bundles.length; ++i) {
             game.settleBundle(i, bundles[i]);
         }
-        return 1;
+        return 0;
     }
 
     function _getStateHash() private view returns (bytes32) {
