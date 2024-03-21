@@ -17,7 +17,7 @@ contract Match is Script {
     }
 
     struct PlayerResult {
-        string name;
+        uint8 playerIdx;
         IPlayer player;
         uint256 score; 
     }
@@ -61,8 +61,10 @@ contract Match is Script {
                     '\t',
                     bullet,
                     ' \x1b[1m',
-                    playerResults[i].name,
-                    '\x1b[0m: ',
+                    players[playerResults[i].playerIdx].name,
+                    '\x1b[0m [',
+                    vm.toString(playerResults[i].playerIdx),
+                    ']: ',
                     _toDecimals(playerResults[i].score)
                 )));
             }
@@ -96,7 +98,7 @@ contract Match is Script {
         playerResults = new PlayerResult[](players.length);
         for (uint256 i; i < players.length; ++i) {
             playerResults[i] = PlayerResult({
-                name: players[ranking[i]].name,
+                playerIdx: ranking[i],
                 player: playerInstances[ranking[i]],
                 score: scores[ranking[i]]
             });
