@@ -773,9 +773,9 @@ contract GameTest is Test {
             if (log.emitter == address(player) && sig == CREATE_BUNDLE_STATE_EVENT_SIGNATURE) {
                 (uint8 playerIdx_, uint8 builderIdx_, bytes32 h) =
                     abi.decode(log.data, (uint8, uint8, bytes32));
-                assertEq(playerIdx_, playerIdx, 'createBundle() playerIdx');
-                assertEq(builderIdx_, builderIdx, 'createBundle() builderIdx');
-                playerCreateBundleStateHash = h;
+                if (playerIdx_ == playerIdx && builderIdx_ == builderIdx) {
+                    playerCreateBundleStateHash = h;
+                }
             } else if (log.emitter == address(builder) && sig == BUILD_BLOCK_STATE_EVENT_SIGNATURE) {
                 (uint8 builderIdx_, bytes32 h) =
                     abi.decode(log.data, (uint8, bytes32));

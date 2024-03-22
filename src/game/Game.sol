@@ -86,7 +86,8 @@ contract Game is AssetMarket {
     event BuildPlayerBlockFailed(uint8 builderIdx, bytes data);
     event Swap(uint8 playerIdx, uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount, uint256 toAmount);
     event GameOver(uint16 rounds, uint8 winnerIdx); 
-    event PlayerBlockGasUsage(uint8 builderIdx, uint256 gasUsed);
+    event PlayerBlockGasUsage(uint8 builderIdx, uint32 gasUsed);
+    event PlayerBundleGasUsage(uint8 builderIdx, uint32 gasUsed);
     event BundleSettled(uint8 playerIdx, bool success, PlayerBundle bundle);
 
     modifier onlyGameMaster() {
@@ -355,6 +356,7 @@ contract Game is AssetMarket {
         uint8 n = playerCount;
         bundles = new PlayerBundle[](n);
         for (uint8 playerIdx; playerIdx < n; ++playerIdx) {
+            uint256 gasUsed = gasleft();
             try this.selfCallPlayerCreateBundle(playerIdx, builderIdx)
                 returns (PlayerBundle memory bundle)
             {
@@ -363,6 +365,8 @@ contract Game is AssetMarket {
                 emit CreateBundleFailed(playerIdx, builderIdx, errData);
                 continue;
             }
+            gasUsed -= gasleft(); 
+            emit PlayerBundleGasUsage(playerIdx, uint32(gasUsed));
         }
     }
 
@@ -375,7 +379,7 @@ contract Game is AssetMarket {
             assert(false);
         } catch (bytes memory data) {
             gasUsed -= gasleft(); 
-            emit PlayerBlockGasUsage(builderIdx, gasUsed);
+            emit PlayerBlockGasUsage(builderIdx, uint32(gasUsed));
             bytes4 selector = data.getSelectorOr(bytes4(0));
             if (selector == BuildPlayerBlockAndRevertSuccess.selector) {
                 data = data.trimLeadingBytesDestructive(4);
