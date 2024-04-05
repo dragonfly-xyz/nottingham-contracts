@@ -10,6 +10,24 @@ library LibTestUtils {
         return uint256(randomBytes32());
     }
 
+    function randomAddress() internal view returns (address payable r) {
+        return payable(address(uint160(randomUint256())));
+    }
+
+    function randomBytes(uint256 len) internal view returns (bytes memory b) {
+        b = new bytes(len);
+        for (uint256 i; i < len; i += 32) {
+            bytes32 w = randomBytes32();
+            uint256 o = len - i > 32 ? 256 : (len - i) * 8;
+            bytes32 m = bytes32(~((uint256(2) << (256 - o)) - 1));
+            assembly ('memory-safe') {
+                let p := add(b, add(0x20, i))
+                let t := mload(p)
+                mstore(p, or(and(w, m), and(t, not(m))))
+            }
+        }
+    }
+
     function toDynArray(bytes[1] memory fixedArr)
         internal pure returns (bytes[] memory dynArr)
     {
