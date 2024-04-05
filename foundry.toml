@@ -7,7 +7,7 @@ evm_version = "cancun"
 remappings = [
     "~=src/"
 ]
-ignored_error_codes = [5159, 3860, 2394]
+ignored_error_codes = [5159, 3860, 2394, 5574]
 
 [invariant]
 fail_on_revert=true
