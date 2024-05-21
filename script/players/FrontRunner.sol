@@ -2,11 +2,11 @@
 pragma solidity ^0.8;
 
 import { Game, IPlayer, PlayerBundle, SwapSell, GOLD_IDX } from '~/game/Game.sol';
-import { Noop } from './Noop.sol';
+import { Passive } from './Passive.sol';
 
 // Player that tries to buy whichever good it has the most of
 // AND tries to perform its swaps before everyone else.
-contract FrontRunner is Noop {
+contract FrontRunner is Passive {
     uint8 immutable PLAYER_IDX;
 
     constructor(uint8 playerIdx, uint8 /* playerCount */)  {

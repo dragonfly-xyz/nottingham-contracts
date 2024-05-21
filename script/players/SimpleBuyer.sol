@@ -2,10 +2,10 @@
 pragma solidity ^0.8;
 
 import { Game, IPlayer, PlayerBundle, SwapSell, GOLD_IDX } from '~/game/Game.sol';
-import { Noop } from './Noop.sol';
+import { Passive } from './Passive.sol';
 
 // Player that keeps trying to buy a single good.
-contract SimpleBuyer is Noop {
+contract SimpleBuyer is Passive {
     uint8 immutable PLAYER_IDX;
     uint8 immutable TARGET_ASSET;
 

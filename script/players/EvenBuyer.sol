@@ -2,10 +2,10 @@
 pragma solidity ^0.8;
 
 import { Game, IPlayer, PlayerBundle, SwapSell, GOLD_IDX } from '~/game/Game.sol';
-import { Noop } from './Noop.sol';
+import { Passive } from './Passive.sol';
 
 // Player that spends an equal amount of gold on each good.
-contract EvenBuyer is Noop {
+contract EvenBuyer is Passive {
     uint8 immutable PLAYER_IDX;
 
     constructor(uint8 playerIdx, uint8 /* playerCount */)  {
