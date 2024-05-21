@@ -5,12 +5,10 @@ struct SwapSell {
     uint8 fromAssetIdx;
     uint8 toAssetIdx;
     uint256 fromAmount;
-    uint256 minToAmount;
 }
 
 struct PlayerBundle {
     SwapSell[] swaps;
-    uint256 builderGoldTip;
 }
 
 interface IPlayer {

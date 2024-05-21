@@ -16,7 +16,7 @@ uint256 constant MAX_PLAYERS = 8;
 uint8 constant MAX_ROUNDS = 32;
 uint256 constant MIN_WINNING_ASSET_BALANCE = 32e18;
 uint256 constant MARKET_STARTING_GOLD_PER_PLAYER = 8e18;
-uint256 constant MARKET_STARTING_GOODS_PER_PLAYER = 2e18;
+uint256 constant MARKET_STARTING_GOODS_PER_PLAYER = 4e18;
 uint8 constant INVALID_PLAYER_IDX = type(uint8).max;
 uint256 constant MAX_CREATION_GAS = 200 * 0x8000 + 1e6;
 uint256 constant PLAYER_CREATE_BUNDLE_GAS_BASE = 1e6;
@@ -69,7 +69,6 @@ contract Game is AssetMarket {
     error BuildBlockFailedError(uint8 builderIdx, bytes revertData);
     error OnlySelfError();
     error TooManySwapsError();
-    error SlippageError(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount, uint256 minToAmount, uint256 actualToAmount);
     error BundleAlreadySettledError(uint8 playerIdx);
     error BuildPlayerBlockAndRevertSuccess(uint256 bid);
     error InsufficientBundleGasError();
@@ -280,18 +279,15 @@ contract Game is AssetMarket {
     }
 
     // Only called by settle().
-    function selfSettleBundle(uint8 playerIdx, uint8 builderIdx, PlayerBundle memory bundle)
+    function selfSettleBundle(uint8 playerIdx, uint8 /* builderIdx */, PlayerBundle memory bundle)
         external onlySelf
     {
         for (uint256 i; i < bundle.swaps.length; ++i) {
             SwapSell memory swap = bundle.swaps[i];
-            uint256 toAmount = _sellAs(playerIdx, swap.fromAssetIdx, swap.toAssetIdx, swap.fromAmount);
-            if (toAmount < swap.minToAmount) {
-                revert SlippageError(swap.fromAssetIdx, swap.toAssetIdx, swap.fromAmount, swap.minToAmount, toAmount);
+            if (swap.fromAmount == 0 || swap.fromAssetIdx == swap.toAssetIdx) {
+                continue;
             }
-        }
-        if (bundle.builderGoldTip != 0) {
-            _transfer(playerIdx, builderIdx, GOLD_IDX, bundle.builderGoldTip);
+            _sellAs(playerIdx, swap.fromAssetIdx, swap.toAssetIdx, swap.fromAmount);
         }
     }
 
@@ -405,16 +401,20 @@ contract Game is AssetMarket {
                 revert BuildBlockFailedError(builderIdx, errData);
             }
         }
-        // All player bundles must be executed (excluding the builder's).
-        uint16 round_ = _round;
-        for (uint8 playerIdx; playerIdx < bundles.length; ++playerIdx) {
-            if (playerIdx != builderIdx) {
-                if (_getPlayerLastBundleHash(playerIdx) != getBundleHash(bundles[playerIdx], round_)) {
-                    revert BundleNotSettledError(builderIdx, playerIdx);
+        // If bid is zero this block will be ignored anyway, so no need to
+        // do more checks.
+        if (bid != 0) {
+            // All player bundles must be executed (excluding the builder's).
+            uint16 round_ = _round;
+            for (uint8 playerIdx; playerIdx < bundles.length; ++playerIdx) {
+                if (playerIdx != builderIdx) {
+                    if (_getPlayerLastBundleHash(playerIdx) != getBundleHash(bundles[playerIdx], round_)) {
+                        revert BundleNotSettledError(builderIdx, playerIdx);
+                    }
                 }
             }
+            _burn(builderIdx, GOLD_IDX, bid);
         }
-        _burn(builderIdx, GOLD_IDX, bid);
         _builder = NULL_PLAYER;
     }
 
@@ -449,7 +449,7 @@ contract Game is AssetMarket {
             resultData.rawRevert();
         } else {
             bundle = abi.decode(resultData, (PlayerBundle));
-            if (bundle.swaps.length > ASSET_COUNT - 1) {
+            if (bundle.swaps.length > ASSET_COUNT) {
                 revert TooManySwapsError();
             }
         }
@@ -473,7 +473,7 @@ contract Game is AssetMarket {
 
     function _buildBlock() internal {
         (uint8 builderIdx, uint256 builderBid) = _auctionBlock();
-        if (builderIdx != INVALID_PLAYER_IDX) {
+        if (builderIdx != INVALID_PLAYER_IDX && builderBid != 0) {
             assert(_buildPlayerBlock(builderIdx) == builderBid);
             lastWinningBid = builderBid;
             emit BlockBuilt(_round, builderIdx, builderBid);

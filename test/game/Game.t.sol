@@ -334,7 +334,7 @@ contract GameTest is Test {
         // Add an extra settleBundle() call for player 0.
         builder.addCallback(IPlayer.buildBlock.selector, address(game), abi.encodeCall(
             Game.settleBundle,
-            (0, PlayerBundle(new SwapSell[](0), 0))
+            (0, PlayerBundle(new SwapSell[](0)))
         ));
         vm.expectRevert(abi.encodeWithSelector(
             Game.BuildBlockFailedError.selector,
@@ -374,12 +374,11 @@ contract GameTest is Test {
         uint8 builderIdx = _getRandomPlayerIdx(game);
         uint8 replacedPlayerIdx = uint8((builderIdx + 1) % game.playerCount());
         TestPlayer builder = TestPlayer(address(players[builderIdx]));
-        game.mint(replacedPlayerIdx, GOLD_IDX, 1337);
         builder.ignorePlayer(replacedPlayerIdx);
         // Call settleBundle() call for replacedPlayerIdx with the wrong bundle.
         builder.addCallback(IPlayer.buildBlock.selector, address(game), abi.encodeCall(
             Game.settleBundle,
-            (replacedPlayerIdx, PlayerBundle(new SwapSell[](0), 1337))
+            (replacedPlayerIdx, PlayerBundle(new SwapSell[](0)))
         ));
         vm.expectRevert(abi.encodeWithSelector(
             Game.BundleNotSettledError.selector,
@@ -471,8 +470,6 @@ contract GameTest is Test {
         uint8 builderIdx = 0;
         TestPlayer builder = TestPlayer(address(players[builderIdx]));
         PlayerBundle[] memory bundles = new PlayerBundle[](players.length);
-        bundles[1].builderGoldTip = 1337;
-        bundles[2].builderGoldTip = 1338;
         TestPlayer(address(players[1])).setBundle(bundles[1]);
         TestPlayer(address(players[2])).setBundle(bundles[2]);
         vm.expectEmit(true, true, true, true, address(builder));
@@ -563,7 +560,7 @@ contract GameTest is Test {
         TestPlayer(address(players[nonBuilderIdx])).addCallback(
             CallbackPlayer.poke.selector,
             address(game),
-            abi.encodeCall(Game.settleBundle, (0, PlayerBundle(new SwapSell[](0), 0)))
+            abi.encodeCall(Game.settleBundle, (0, PlayerBundle(new SwapSell[](0))))
         );
         vm.expectRevert(abi.encodeWithSelector(
             Game.BuildBlockFailedError.selector,
@@ -580,12 +577,11 @@ contract GameTest is Test {
         ]));
         uint8 builderIdx = _getRandomPlayerIdx(game);
         uint8 playerIdx = uint8((builderIdx + 1) % players.length);
-        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1), 0);
+        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1));
         bundle.swaps[0] = SwapSell({
             fromAssetIdx: 0,
             toAssetIdx: 1,
-            fromAmount: 1e18,
-            minToAmount: type(uint256).max
+            fromAmount: 1e18
         });
         game.setCurrentBuilder(builderIdx);
         vm.expectEmit(true, true, true, true);
@@ -601,12 +597,11 @@ contract GameTest is Test {
         ]));
         uint8 builderIdx = _getRandomPlayerIdx(game);
         uint8 playerIdx = uint8((builderIdx + 1) % players.length);
-        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1), 0);
+        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1));
         bundle.swaps[0] = SwapSell({
             fromAssetIdx: 0,
             toAssetIdx: 1,
-            fromAmount: 1e18,
-            minToAmount: type(uint256).max
+            fromAmount: 1e18
         });
         game.setCurrentBuilder(builderIdx);
         vm.expectRevert(abi.encodeWithSelector(Game.InsufficientBundleGasError.selector));
@@ -621,12 +616,11 @@ contract GameTest is Test {
         ]));
         uint8 builderIdx = _getRandomPlayerIdx(game);
         uint8 playerIdx = uint8((builderIdx + 1) % players.length);
-        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1), 0);
+        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1));
         bundle.swaps[0] = SwapSell({
             fromAssetIdx: 0,
             toAssetIdx: 1,
-            fromAmount: 1e18,
-            minToAmount: type(uint256).max
+            fromAmount: 1e18
         });
         game.setCurrentBuilder(builderIdx);
         vm.expectEmit(true, true, true, true);
@@ -648,46 +642,21 @@ contract GameTest is Test {
         ]));
         uint8 builderIdx = _getRandomPlayerIdx(game);
         uint8 playerIdx = uint8((builderIdx + 1) % players.length);
-        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1), 0);
+        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1));
         bundle.swaps[0] = SwapSell({
             fromAssetIdx: 0,
             toAssetIdx: 1,
-            fromAmount: 1e18,
-            minToAmount: type(uint256).max
+            fromAmount: 1e18
         });
         game.setCurrentBuilder(builderIdx);
         vm.expectEmit(true, true, true, true);
         emit Game.BundleSettled(playerIdx, false, bundle);
         vm.prank(address(players[builderIdx]));
         game.settleBundle(playerIdx, bundle);
-        bundle.builderGoldTip = 1;
         vm.expectRevert(abi.encodeWithSelector(
             Game.BundleAlreadySettledError.selector,
             playerIdx
         ));
-        vm.prank(address(players[builderIdx]));
-        game.settleBundle(playerIdx, bundle);
-    }
-
-    function test_settleBundle_failsIfSlippageIsTooHigh() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(TestPlayer).creationCode,
-            type(TestPlayer).creationCode
-        ]));
-        uint8 builderIdx = _getRandomPlayerIdx(game);
-        uint8 playerIdx = uint8((builderIdx + 1) % players.length);
-        game.mint(playerIdx, GOLD_IDX, 1e18);
-        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1), 0);
-        bundle.swaps[0] = SwapSell({
-            fromAssetIdx: 0,
-            toAssetIdx: 1,
-            fromAmount: 1e18,
-            minToAmount: type(uint256).max
-        });
-        game.mint(playerIdx, 0, 1e18);
-        game.setCurrentBuilder(builderIdx);
-        vm.expectEmit(true, true, true, true);
-        emit Game.BundleSettled(playerIdx, false, bundle);
         vm.prank(address(players[builderIdx]));
         game.settleBundle(playerIdx, bundle);
     }
@@ -700,12 +669,11 @@ contract GameTest is Test {
         uint8 builderIdx = _getRandomPlayerIdx(game);
         uint8 playerIdx = uint8((builderIdx + 1) % players.length);
         game.mint(playerIdx, GOLD_IDX, 1e18);
-        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1), 0);
+        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](1));
         bundle.swaps[0] = SwapSell({
             fromAssetIdx: 0,
             toAssetIdx: 1,
-            fromAmount: 1e18,
-            minToAmount: 1
+            fromAmount: 1e18
         });
         game.mint(playerIdx, 0, 1e18);
         game.setCurrentBuilder(builderIdx);
@@ -715,40 +683,6 @@ contract GameTest is Test {
         vm.expectEmit(true, true, true, true);
         emit Game.BundleSettled(playerIdx, true, bundle);
         vm.prank(address(players[builderIdx]));
-        game.settleBundle(playerIdx, bundle);
-    }
-
-    function test_settleBundle_canTip() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(TestPlayer).creationCode,
-            type(TestPlayer).creationCode
-        ]));
-        uint8 builderIdx = _getRandomPlayerIdx(game);
-        uint8 playerIdx = uint8((builderIdx + 1) % players.length);
-        game.mint(playerIdx, GOLD_IDX, 1e18);
-        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](0), 1e18);
-        game.setCurrentBuilder(builderIdx);
-        vm.expectEmit(true, true, true, true);
-        emit Game.BundleSettled(playerIdx, true, bundle);
-        vm.prank(address(players[builderIdx]));
-        game.settleBundle(playerIdx, bundle);
-        assertEq(game.balanceOf(builderIdx, GOLD_IDX), 1e18);
-        assertEq(game.balanceOf(playerIdx, GOLD_IDX), 0);
-    }
-
-    function test_settleBundle_failsIfNotEnoughTip() external {
-        (TestGame game, IPlayer[] memory players) = _createGame(T.toDynArray([
-            type(TestPlayer).creationCode,
-            type(TestPlayer).creationCode
-        ]));
-        uint8 builderIdx = _getRandomPlayerIdx(game);
-        uint8 playerIdx = uint8((builderIdx + 1) % players.length);
-        game.mint(playerIdx, GOLD_IDX, 1e18);
-        PlayerBundle memory bundle = PlayerBundle(new SwapSell[](0), 1e18 + 1);
-        game.setCurrentBuilder(builderIdx);
-        vm.prank(address(players[builderIdx]));
-        vm.expectEmit(true, true, true, true);
-        emit Game.BundleSettled(playerIdx, false, bundle);
         game.settleBundle(playerIdx, bundle);
     }
 
@@ -1289,7 +1223,6 @@ contract TestPlayer is CallbackPlayer {
         for (uint256 i; i < bundle.swaps.length; ++i) {
             _bundle.swaps.push(bundle.swaps[i]);
         }
-        _bundle.builderGoldTip = bundle.builderGoldTip;
     }
    
     function setBid(uint256 bid_) external {

@@ -20,6 +20,7 @@ contract Match is Script {
         uint8 playerIdx;
         IPlayer player;
         uint256 score; 
+        uint8 scoreAssetIdx;
     }
 
     function setUp() external {
@@ -65,7 +66,9 @@ contract Match is Script {
                     '\x1b[0m [',
                     vm.toString(playerResults[i].playerIdx),
                     ']: ',
-                    _toDecimals(playerResults[i].score)
+                    _toDecimals(playerResults[i].score),
+                    ' ',
+                    _toAssetEmoji(playerResults[i].scoreAssetIdx)
                 )));
             }
         }
@@ -88,11 +91,29 @@ contract Match is Script {
                 playerCreationCodes 
             );
         }
+        for (uint256 i; i < playerInstances.length; ++i) {
+            if (address(playerInstances[i]).code.length == 0) {
+                revert(string(abi.encodePacked(
+                    'Player "',
+                    players[i].name,
+                    '" failed to deploy!'
+                )));
+            }
+        }
         uint8 winnerIdx = INVALID_PLAYER_IDX;
         while (winnerIdx == INVALID_PLAYER_IDX) {
             winnerIdx = game.playRound();
         }
         uint256[] memory scores = game.scorePlayers();
+        uint8[] memory scoreAssetIdxs = new uint8[](players.length);
+        for (uint8 i; i < playerInstances.length; ++i) {
+            for (uint8 j = 1; j < players.length; ++j) {
+                if (game.balanceOf(i, j) == scores[i]) {
+                    scoreAssetIdxs[i] = j;
+                    break;
+                }
+            }
+        }
         uint8[] memory ranking = _rankPlayers(scores);
         assert(winnerIdx == ranking[0]);
         playerResults = new PlayerResult[](players.length);
@@ -100,7 +121,8 @@ contract Match is Script {
             playerResults[i] = PlayerResult({
                 playerIdx: ranking[i],
                 player: playerInstances[ranking[i]],
-                score: scores[ranking[i]]
+                score: scores[ranking[i]],
+                scoreAssetIdx: scoreAssetIdxs[ranking[i]]
             });
         }
     }
@@ -130,5 +152,18 @@ contract Match is Script {
         uint256 whole = weis / 1e18;
         uint256 frac = weis - (whole * 1e18);
         return string(abi.encodePacked(vm.toString(whole), '.', vm.toString(frac)));
+    }
+
+    function _toAssetEmoji(uint8 assetIdx)
+        private pure returns (string memory emoji)
+    {
+        if (assetIdx > 6) return string(abi.encodePacked('$', vm.toString(assetIdx)));
+        if (assetIdx == 6) return unicode'🍌';
+        if (assetIdx == 5) return unicode'🍒';
+        if (assetIdx == 4) return unicode'🥑';
+        if (assetIdx == 3) return unicode'🍇';
+        if (assetIdx == 2) return unicode'🍍';
+        if (assetIdx == 1) return unicode'🍅';
+        return unicode'🪙';
     }
 }

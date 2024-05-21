@@ -2,9 +2,10 @@
 pragma solidity ^0.8;
 
 import { Game, IPlayer, PlayerBundle, SwapSell, GOLD_IDX } from '~/game/Game.sol';
+import { Noop } from './Noop.sol';
 
-// Player bot that keeps trying to buy a single good.
-contract SimpleBuyer is IPlayer {
+// Player that keeps trying to buy a single good.
+contract SimpleBuyer is Noop {
     uint8 immutable PLAYER_IDX;
     uint8 immutable TARGET_ASSET;
 
@@ -14,7 +15,7 @@ contract SimpleBuyer is IPlayer {
     }
 
     function createBundle(uint8 /* builderIdx */)
-        external view returns (PlayerBundle memory bundle)
+        external override returns (PlayerBundle memory bundle)
     {
         Game game = Game(msg.sender);
         uint8 assetCount = game.assetCount();
@@ -25,32 +26,14 @@ contract SimpleBuyer is IPlayer {
             bundle.swaps[i - 1] = SwapSell({
                 fromAssetIdx: fromAsset,
                 toAssetIdx: TARGET_ASSET,
-                fromAmount: game.balanceOf(PLAYER_IDX, fromAsset),
-                minToAmount: 0
+                fromAmount: game.balanceOf(PLAYER_IDX, fromAsset)
             });
         }
         // Convert half of gold into target asset.
         bundle.swaps[bundle.swaps.length - 1] = SwapSell({
             fromAssetIdx: GOLD_IDX,
             toAssetIdx: TARGET_ASSET,
-            fromAmount: game.balanceOf(PLAYER_IDX, GOLD_IDX) / 2,
-            minToAmount: 0
+            fromAmount: game.balanceOf(PLAYER_IDX, GOLD_IDX) / 2
         });
-    }
-
-    function buildBlock(PlayerBundle[] memory bundles)
-        external returns (uint256 goldBid)
-    {
-        Game game = Game(address(msg.sender));
-        // Settle our bundle first.
-        game.settleBundle(PLAYER_IDX, bundles[PLAYER_IDX]);
-        // Settle everyone else's.
-        for (uint8 i; i < bundles.length; ++i) {
-            if (i != PLAYER_IDX) {
-                game.settleBundle(i, bundles[i]);
-            }
-        }
-        // Bid all of remaining gold.
-        return game.balanceOf(PLAYER_IDX, GOLD_IDX);
     }
 }
