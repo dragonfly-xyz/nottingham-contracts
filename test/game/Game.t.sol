@@ -356,6 +356,8 @@ contract GameTest is Test {
         uint8 builderIdx = _getRandomPlayerIdx(game);
         uint8 ignoredPlayerIdx = uint8((builderIdx + 1) % game.playerCount());
         TestPlayer builder = TestPlayer(address(players[builderIdx]));
+        game.mint(builderIdx, GOLD_IDX, 1);
+        builder.setBid(1);
         builder.ignorePlayer(ignoredPlayerIdx);
         vm.expectRevert(abi.encodeWithSelector(
             Game.BundleNotSettledError.selector,
@@ -375,10 +377,12 @@ contract GameTest is Test {
         uint8 replacedPlayerIdx = uint8((builderIdx + 1) % game.playerCount());
         TestPlayer builder = TestPlayer(address(players[builderIdx]));
         builder.ignorePlayer(replacedPlayerIdx);
+        builder.setBid(1);
+        game.mint(builderIdx, GOLD_IDX, 1);
         // Call settleBundle() call for replacedPlayerIdx with the wrong bundle.
         builder.addCallback(IPlayer.buildBlock.selector, address(game), abi.encodeCall(
             Game.settleBundle,
-            (replacedPlayerIdx, PlayerBundle(new SwapSell[](0)))
+            (replacedPlayerIdx, PlayerBundle(new SwapSell[](1)))
         ));
         vm.expectRevert(abi.encodeWithSelector(
             Game.BundleNotSettledError.selector,
