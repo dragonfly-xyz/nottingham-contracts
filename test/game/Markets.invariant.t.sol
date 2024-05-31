@@ -65,6 +65,21 @@ contract MarketsInvariantTest is Test {
         }
     }
 
+    function invariant_indirectEqualsDirectSwaps() external {
+        TestMarket[] memory markets_ = markets.getAllMarkets();
+        for (uint256 i; i < markets_.length; ++i) {
+            TestMarket m = markets_[i];
+            uint8 n = m.assetCount();
+            uint256 sellAmount = m.reserve(0) / 2;
+            uint256 directBuyAmount = m.quoteSell(0, n - 1, sellAmount);
+            uint256 indirectBuyAmount = sellAmount;
+            for (uint8 j = 1; j < n; ++j) {
+                indirectBuyAmount = m.sell(j - 1, j, indirectBuyAmount);
+            }
+            assertApproxEqAbs(directBuyAmount, indirectBuyAmount, 1);
+        }
+    }
+
     function _assertK(TestMarket market) private {
         uint256 initialK = market.INITIAL_K();
         uint256 k = market.k();
