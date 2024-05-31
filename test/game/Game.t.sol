@@ -1017,9 +1017,11 @@ contract TestGame is Game {
 
     function setCurrentBuilder(uint8 builderIdx) external {
         _assertValidPlayerIdx(builderIdx);
-        _builder = builderIdx == INVALID_PLAYER_IDX || builderIdx == MOCK_UNSET_PLAYER_IDX
+        IPlayer builder =
+            builderIdx == INVALID_PLAYER_IDX || builderIdx == MOCK_UNSET_PLAYER_IDX
             ? NULL_PLAYER
             : _playerByIdx[builderIdx];
+        t_currentBuilder.store(address(builder));
     }
 
     function __distributeIncome() external virtual {

@@ -1,70 +1,50 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.25;
+pragma solidity ^0.8.26;
 
 import { AssetMarket } from './Markets.sol';
 import { LibBytes } from './LibBytes.sol';
 import { LibAddress } from './LibAddress.sol';
 import { IPlayer, PlayerBundle, SwapSell } from './IPlayer.sol';
 import { SafeCreate2 } from './SafeCreate2.sol';
+import './Constants.sol';
+import './GameUtils.sol';
 
-IPlayer constant NULL_PLAYER = IPlayer(address(0));
-uint160 constant PLAYER_ADDRESS_INDEX_MASK = 7;
-uint8 constant GOLD_IDX = 0;
-uint256 constant MIN_PLAYERS = 2;
-// Bounded by size of address suffix.
-uint256 constant MAX_PLAYERS = 8;
-uint8 constant MAX_ROUNDS = 32;
-uint256 constant MIN_WINNING_ASSET_BALANCE = 32e18;
-uint256 constant MARKET_STARTING_GOLD_PER_PLAYER = 8e18;
-uint256 constant MARKET_STARTING_GOODS_PER_PLAYER = 4e18;
-uint8 constant INVALID_PLAYER_IDX = type(uint8).max;
-uint256 constant MAX_CREATION_GAS = 200 * 0x8000 + 1e6;
-uint256 constant PLAYER_CREATE_BUNDLE_GAS_BASE = 1e6;
-uint256 constant PLAYER_CREATE_BUNDLE_GAS_PER_PLAYER = 250e3;
-uint256 constant PLAYER_BUILD_BLOCK_GAS_BASE = 2e6;
-uint256 constant PLAYER_BUILD_BLOCK_GAS_PER_PLAYER = 500e3;
-uint256 constant MAX_RETURN_DATA_SIZE = 1024;
-uint256 constant INCOME_AMOUNT = 1e18;
-uint256 constant MIN_GAS_PER_BUNDLE_SWAP = 50e3;
-
-function getIndexFromPlayer(IPlayer player) pure returns (uint8 playerIdx) {
-    // The deployment process in the constructor ensures that the lowest 3 bits of the
-    // player's address is also its player index.
-    return uint8(uint160(address(player)) & PLAYER_ADDRESS_INDEX_MASK);
-}
-
-function getBundleHash(PlayerBundle memory bundle, uint16 round)
-    pure returns (bytes32 hash)
-{
-    return bytes32((uint256(keccak256(abi.encode(bundle))) & ~uint256(0xFFFF)) | round);
-}
-
-function getRoundFromBundleHash(bytes32 hash) pure returns (uint16 round) {
-    return uint16(uint256(hash) & 0xFFFF);
-}
-
+/// @notice A friendly game of Searchers of Nottingham.
+/// @dev One instance is deployed per game.
 contract Game is AssetMarket {
     using LibBytes for bytes;
     using LibAddress for address;
+    
+    /// @dev Transient bytes32 array to remember player bundle hashes
+    ///      during a block.
+    TransientArray_Bytes32 internal constant t_playerBundleHash = TransientArray_Bytes32.wrap(1);
+    /// @dev Transient bool reentrancy guard for playRound().
+    TransientBool internal constant t_inRound = TransientBool.wrap(2);
+    /// @dev Transient address indicating current builder during a block.
+    TransientAddress internal constant t_currentBuilder = TransientAddress.wrap(3);
 
-    uint256 constant PLAYER_BUNDLE_HASH_TSLOT = 1;
-
+    /// @notice Who can call playRound().
     address public immutable gm;
+    /// @notice How many players are in this game.
     uint8 public immutable playerCount;
+    /// @dev How many rounds have passed.
+    ///      Warning: Upper bits will be set when the game has encountered
+    ///      a win state.
     uint16 internal _round;
-    bool _inRound;
-    IPlayer _builder;
+    /// @dev The last winning bid for the previous round. Will be 0 if there
+    ///      was no builder.
     uint256 public lastWinningBid;
+    /// @notice Balance of a player's asset (goods or gold).
     mapping (uint8 playerIdx => mapping (uint8 assetIdx => uint256 balance)) public balanceOf;
+    /// @dev Map of player idxs to addresses.
     mapping (uint8 playerIdx => IPlayer player) internal  _playerByIdx;
 
     error GameOverError();
-    error GameSetupError(string msg);
+    error GameSetupError(string message);
     error AccessError();
     error AlreadyInRoundError();
     error DuringBlockError();
     error InsufficientBalanceError(uint8 playerIdx, uint8 assetIdx);
-    error InvalidPlayerError();
     error BundleNotSettledError(uint8 builderIdx, uint8 playerIdx);
     error BuildBlockFailedError(uint8 builderIdx, bytes revertData);
     error OnlySelfError();
@@ -90,17 +70,17 @@ contract Game is AssetMarket {
     event BundleSettled(uint8 playerIdx, bool success, PlayerBundle bundle);
 
     modifier onlyGameMaster() {
-        if (msg.sender != gm) revert AccessError();
+        require(msg.sender == gm, AccessError());
         _;
     }
    
     modifier onlyBuilder() {
-        if (msg.sender != address(_builder)) revert AccessError();
+        require(msg.sender == address(t_currentBuilder.load()), AccessError());
         _;
     }
    
     modifier onlySelf() {
-        if (msg.sender != address(this)) revert OnlySelfError();
+        require(msg.sender == address(this), OnlySelfError());
         _;
     }
    
@@ -112,14 +92,16 @@ contract Game is AssetMarket {
     )
         AssetMarket(uint8(playerCreationCodes.length)) // num Assets = player count
     {
-        if (playerCreationCodes.length != deploySalts.length) {
-            revert GameSetupError('mismatched arrays');
-        }
+        require(
+            playerCreationCodes.length == deploySalts.length,
+            GameSetupError('mismatched arrays')
+        );
         gm = gameMaster;
         playerCount = uint8(playerCreationCodes.length);
-        if (playerCount < MIN_PLAYERS || playerCount > MAX_PLAYERS) {
-            revert GameSetupError('# of players');
-        }
+        require(
+            playerCount >= MIN_PLAYERS && playerCount <= MAX_PLAYERS,
+            GameSetupError('# of players')
+        );
         playerCount = uint8(playerCreationCodes.length);
         {
             bytes memory initArgs = abi.encode(0, playerCount);
@@ -139,14 +121,15 @@ contract Game is AssetMarket {
                     emit CreatePlayerFailed(i);
                 }
                 // The lowest uint8 of each deployed address should also hold the player index.
-                if (uint160(address(player)) & PLAYER_ADDRESS_INDEX_MASK != i) {
-                    revert GameSetupError('player index');
-                }
+                require(
+                    uint160(address(player)) & PLAYER_ADDRESS_INDEX_MASK == i,
+                    GameSetupError('player index')
+                );
                 _playerByIdx[i] = player;
             }
         }
         {
-            // There will be nplayer assets (incl gold) in the market to ensure
+            // There will be n-player assets (incl gold) in the market to ensure
             // at least one asset will be in contention.
             uint8 assetCount_ = uint8(ASSET_COUNT);
             uint256[] memory assetReserves = new uint256[](assetCount_);
@@ -207,10 +190,10 @@ contract Game is AssetMarket {
     }
 
     function playRound() external onlyGameMaster returns (uint8 winnerIdx) {
-        if (_inRound) revert AlreadyInRoundError();
-        _inRound = true;
+        require(!t_inRound.load(), AlreadyInRoundError());
+        t_inRound.store(true);
         uint16 round_ = _round;
-        if (round_ >= MAX_ROUNDS) revert GameOverError();
+        require(round_ < MAX_ROUNDS, GameOverError());
         _distributeIncome();
         _buildBlock();
         emit RoundPlayed(round_);
@@ -226,7 +209,7 @@ contract Game is AssetMarket {
                 _round = ++round_;
             }
         }
-        _inRound = false;
+        t_inRound.store(false);
         if (winnerIdx != INVALID_PLAYER_IDX) {
             emit GameOver(_getTrueRoundCount(round_), winnerIdx);
         }
@@ -257,7 +240,7 @@ contract Game is AssetMarket {
     function settleBundle(uint8 playerIdx, PlayerBundle memory bundle)
         external onlyBuilder returns (bool success)
     {
-        if (playerIdx >= playerCount) revert InvalidPlayerError();
+        require(playerIdx < playerCount, InvalidPlayerError());
         {
             uint16 round_ = _round;
             {
@@ -271,7 +254,11 @@ contract Game is AssetMarket {
         if (gasleft() < MIN_GAS_PER_BUNDLE_SWAP * bundle.swaps.length + 2e3) {
             revert InsufficientBundleGasError();
         }
-        try this.selfSettleBundle(playerIdx, getIndexFromPlayer(_builder), bundle) {
+        try this.selfSettleBundle(
+            playerIdx,
+            getIndexFromPlayer(IPlayer(t_currentBuilder.load())),
+            bundle
+        ) {
             success = true;
         } catch {}
         emit BundleSettled(playerIdx, success, bundle);
@@ -335,15 +322,7 @@ contract Game is AssetMarket {
     }
 
     function _assertValidAsset(uint8 assetIdx) private view {
-        if (assetIdx >= ASSET_COUNT) revert InvalidAssetError();
-    }
-
-
-    function _getPlayerLastBundleHash(uint8 playerIdx) private view returns (bytes32 hash) {
-        assembly ('memory-safe') {
-            mstore(0x00, PLAYER_BUNDLE_HASH_TSLOT)
-            hash := tload(add(keccak256(0x00, 0x20), playerIdx))
-        }
+        require(assetIdx < ASSET_COUNT, InvalidAssetError());
     }
 
     function _getPlayerBundles(uint8 builderIdx)
@@ -390,16 +369,14 @@ contract Game is AssetMarket {
         internal returns (uint256 bid)
     {
         IPlayer builder = _playerByIdx[builderIdx];
-        assert(_builder == NULL_PLAYER);
-        _builder = builder;
+        assert(IPlayer(t_currentBuilder.load()) == NULL_PLAYER);
+        t_currentBuilder.store(address(builder));
         PlayerBundle[] memory bundles = _getPlayerBundles(builderIdx);
         {
             bool success;
             bytes memory errData;
             (success, bid, errData) = _safeCallPlayerBuild(builder, bundles);
-            if (!success) {
-                revert BuildBlockFailedError(builderIdx, errData);
-            }
+            require(success, BuildBlockFailedError(builderIdx, errData));
         }
         // If bid is zero this block will be ignored anyway, so no need to
         // do more checks.
@@ -415,7 +392,7 @@ contract Game is AssetMarket {
             }
             _burn(builderIdx, GOLD_IDX, bid);
         }
-        _builder = NULL_PLAYER;
+        t_currentBuilder.store(address(NULL_PLAYER));
     }
 
     function _safeCallPlayerBuild(IPlayer builder, PlayerBundle[] memory bundles)
@@ -449,9 +426,7 @@ contract Game is AssetMarket {
             resultData.rawRevert();
         } else {
             bundle = abi.decode(resultData, (PlayerBundle));
-            if (bundle.swaps.length > ASSET_COUNT) {
-                revert TooManySwapsError();
-            }
+            require(bundle.swaps.length <= ASSET_COUNT, TooManySwapsError());
         }
     }
 
@@ -478,6 +453,7 @@ contract Game is AssetMarket {
             lastWinningBid = builderBid;
             emit BlockBuilt(_round, builderIdx, builderBid);
         } else {
+            lastWinningBid = 0;
             emit EmptyBlock(_round);
         }
     }
@@ -493,36 +469,29 @@ contract Game is AssetMarket {
     }
 
     function _mint(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) internal {
+        _assertValidAsset(assetIdx);
         balanceOf[playerIdx][assetIdx] += assetAmount;
         emit Mint(playerIdx, assetIdx, assetAmount);
     }
 
     function _burn(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) internal {
+        _assertValidAsset(assetIdx);
         uint256 bal = balanceOf[playerIdx][assetIdx];
-        if (bal < assetAmount) revert InsufficientBalanceError(playerIdx, assetIdx);
+        require(bal >= assetAmount, InsufficientBalanceError(playerIdx, assetIdx));
         unchecked {
             balanceOf[playerIdx][assetIdx] = bal - assetAmount;
         }
         emit Burn(playerIdx, assetIdx, assetAmount);
     }
 
-    function _transfer(uint8 fromPlayerIdx, uint8 toPlayerIdx, uint8 assetIdx, uint256 amount)
-        internal
+    function _getPlayerLastBundleHash(uint8 playerIdx)
+        private view returns (bytes32 hash)
     {
-        uint256 fromBal = balanceOf[fromPlayerIdx][assetIdx];
-        if (fromBal < amount) revert InsufficientBalanceError(fromPlayerIdx, assetIdx);
-        unchecked {
-            balanceOf[fromPlayerIdx][assetIdx] = fromBal - amount;
-            balanceOf[toPlayerIdx][assetIdx] += amount;
-        }
-        emit Transfer(fromPlayerIdx, toPlayerIdx, assetIdx, amount);
+        return t_playerBundleHash.load(playerIdx);
     }
 
     function _setPlayerLastBundleHash(uint8 playerIdx, bytes32 hash) private {
-        assembly ('memory-safe') {
-            mstore(0x00, PLAYER_BUNDLE_HASH_TSLOT)
-            tstore(add(keccak256(0x00, 0x20), playerIdx), hash)
-        }
+        t_playerBundleHash.store(playerIdx, hash);
     }
 
     function _sellAs(uint8 playerIdx, uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount)
