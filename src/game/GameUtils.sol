@@ -50,13 +50,17 @@ library LibTransientArray_Bytes32 {
         uint256 idx,
         bytes32 v
     ) internal {
-        tstore(hashSlot(TransientArray_Bytes32.unwrap(slot)) + idx, v);
+        unchecked {
+            tstore(hashSlot(TransientArray_Bytes32.unwrap(slot)) + idx, v);
+        }
     }
 
     function load(TransientArray_Bytes32 slot, uint256 idx)
         internal view returns (bytes32 v)
     {
-        v = tload(hashSlot(TransientArray_Bytes32.unwrap(slot)) + idx);
+        unchecked {
+            v = tload(hashSlot(TransientArray_Bytes32.unwrap(slot)) + idx);
+        }
     }
 }
 
