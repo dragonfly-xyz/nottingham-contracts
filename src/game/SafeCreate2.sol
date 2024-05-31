@@ -3,6 +3,7 @@ pragma solidity ^0.8;
 
 import { LibBytes } from './LibBytes.sol';
 
+/// @notice A CREATE2 wrapper so you can enforce a gas limit.
 contract SafeCreate2 {
     using LibBytes for bytes; 
 

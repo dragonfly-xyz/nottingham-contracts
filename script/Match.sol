@@ -161,8 +161,8 @@ contract Match is Script {
         if (assetIdx == 6) return unicode'🍌';
         if (assetIdx == 5) return unicode'🍒';
         if (assetIdx == 4) return unicode'🥑';
-        if (assetIdx == 3) return unicode'🍇';
-        if (assetIdx == 2) return unicode'🍍';
+        if (assetIdx == 3) return unicode'🐟️';
+        if (assetIdx == 2) return unicode'🥖';
         if (assetIdx == 1) return unicode'🍅';
         return unicode'🪙';
     }

@@ -84,6 +84,12 @@ contract Game is AssetMarket {
         _;
     }
    
+    /// @notice Create a new game.
+    /// @dev This will also deploy all players. A failing player deployment will
+    ///      not cause a revert. The game will proceed essentially as if the player
+    ///     is doing nothing. Players are deployed with CREATE2 and a salt must be
+    ///     mined that ensures that the last 3 bits of the deployed address matches
+    ///     each player's index (the order they're passed in).
     constructor(
         address gameMaster,
         SafeCreate2 sc2,
@@ -102,6 +108,7 @@ contract Game is AssetMarket {
             playerCount >= MIN_PLAYERS && playerCount <= MAX_PLAYERS,
             GameSetupError('# of players')
         );
+        // Deploy players.
         playerCount = uint8(playerCreationCodes.length);
         {
             bytes memory initArgs = abi.encode(0, playerCount);
@@ -116,18 +123,21 @@ contract Game is AssetMarket {
                 ) returns (address player_) {
                     player = IPlayer(player_);
                 } catch {
-                    // Assign to empty player address.
-                    player = IPlayer(address((255 & (~PLAYER_ADDRESS_INDEX_MASK)) | i));
+                    // Deployment failed.
+                    // Assign to a nonzero but empty player address.
+                    player = IPlayer(address(uint160((1 << 159) | i)));
                     emit CreatePlayerFailed(i);
                 }
-                // The lowest uint8 of each deployed address should also hold the player index.
+                // The lowest 3 bits of each deployed address should also hold the
+                // player index.
                 require(
-                    uint160(address(player)) & PLAYER_ADDRESS_INDEX_MASK == i,
+                    getIndexFromPlayer(player) == i,
                     GameSetupError('player index')
                 );
                 _playerByIdx[i] = player;
             }
         }
+        // Initialize the market.
         {
             // There will be n-player assets (incl gold) in the market to ensure
             // at least one asset will be in contention.
@@ -141,11 +151,15 @@ contract Game is AssetMarket {
         }
     }
 
+    /// @notice Return the player index that matches the win condition.
+    ///         Returns `INVALID_PLAYER_IDX` if no player has met the win condition.
     function findWinner() external view returns (uint8 winnerIdx) {
         IPlayer winner = _findWinner(_round);
         return winner == NULL_PLAYER ? INVALID_PLAYER_IDX : getIndexFromPlayer(winner);
     }
 
+    /// @notice Get the respective scores of each player.
+    /// @dev The score is the maximum balance of each goods (non-gold) token of a player.
     function scorePlayers() external view returns (uint256[] memory scores) {
         scores = new uint256[](playerCount);
         for (uint8 playerIdx; playerIdx < scores.length; ++playerIdx) {
@@ -153,18 +167,31 @@ contract Game is AssetMarket {
         }
     }
 
+    /// @notice Get the current round index.
+    /// @dev Always <= MAX_ROUNDS.
     function round() public view returns (uint16 round_) {
         return _getTrueRoundCount(_round);
     }
 
+    /// @notice Get the number of kinds of assets (tokens) in the market. Goods + gold.
+    /// @dev This is always equal to `playerCount`.
     function assetCount() external view returns (uint8) {
         return ASSET_COUNT;
     }
 
+    /// @notice Whether a winner has been declared or the maximum number
+    ///         of rounds have been played.
     function isGameOver() public view returns (bool) {
+        // Upper bit in `_rounds` will be set if a winner is found at the
+        // end of playRound() so this expression will be true either if
+        // a winner is declared or if the maximum number of rounds has been
+        // reached.
         return _round >= MAX_ROUNDS;
     }
 
+    /// @notice Compute how much `toAssetIdx` asset you would get if you sold
+    ///         `fromAmount` of `fromAssetIdx` asset.
+    /// @dev Can revert if the swap depletes nearly all liquidity.
     function quoteSell(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount)
         external view returns (uint256 toAmount)
     {
@@ -173,6 +200,9 @@ contract Game is AssetMarket {
         return AssetMarket._quoteSell(fromAssetIdx, toAssetIdx, fromAmount);
     }
 
+    /// @notice Compute how much `fromAssetIdx` asset you would sell if you bought
+    ///         `tomAmount` of `toAssetIdx` asset.
+    /// @dev Can revert if the swap depletes nearly all liquidity.
     function quoteBuy(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 toAmount)
         external view returns (uint256 fromAmount)
     {
@@ -181,6 +211,7 @@ contract Game is AssetMarket {
         return AssetMarket._quoteBuy(fromAssetIdx, toAssetIdx, toAmount);
     }
 
+    /// @notice Returns the supply of each asset pool in the market.
     function marketState() external view returns (uint256[] memory reserves) {
         reserves = new uint256[](ASSET_COUNT);
         for (uint8 assetIdx; assetIdx < ASSET_COUNT; ++assetIdx) {
@@ -189,6 +220,9 @@ contract Game is AssetMarket {
         return reserves;
     }
 
+    /// @notice Play a game round.
+    /// @dev Can not be called again if a winner is found or if the maximum
+    ///      number of rounds have been played.
     function playRound() external onlyGameMaster returns (uint8 winnerIdx) {
         require(!t_inRound.load(), AlreadyInRoundError());
         t_inRound.store(true);
@@ -215,6 +249,11 @@ contract Game is AssetMarket {
         }
     }
 
+    /// @notice Directly sell `fromAmount` of `fromAssetIdx` asset for `toAssetIdx`
+    ///         and return how much of `toAssetIdx` was bought.
+    /// @dev Can revert if the swap depletes nearly all liquidity.
+    ///      Can only be called by the current block builder.
+    ///      Other players must perform swaps using bundles.
     function sell(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount)
         external onlyBuilder returns (uint256 toAmount)
     {
@@ -223,6 +262,11 @@ contract Game is AssetMarket {
         return _sellAs(playerIdx, fromAssetIdx, toAssetIdx, fromAmount);
     }
 
+    /// @notice Directly buy `toAmount` of `toAssetIdx` asset for `fromAssetIdx`
+    ///         and return how much of `fromAssetIdx` was sold.
+    /// @dev Can revert if the swap depletes nearly all liquidity.
+    ///      Can only be called by the current block builder.
+    ///      Other players must perform swaps using bundles.
     function buy(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 toAmount)
         external onlyBuilder returns (uint256 fromAmount)
     {
@@ -231,12 +275,19 @@ contract Game is AssetMarket {
         return _buyAs(playerIdx, fromAssetIdx, toAssetIdx, toAmount);
     }
 
+    /// @dev Build a block as player `builderIdx` and revert state.
     function buildPlayerBlockAndRevert(uint8 builderIdx)
         external onlySelf
     {
         revert BuildPlayerBlockAndRevertSuccess(_buildPlayerBlock(builderIdx));
     }
 
+    /// @notice As a builder, settle another player's swap bundle.
+    /// @dev This will perform all the swaps in the bundle in order.
+    ///      If any of the swaps in the bundle revert, the entire bundle
+    ///      reverts, but the block will still be valid. The builder cannot
+    ///      modify another player's bundle without causing their
+    ///      block to be discarded.
     function settleBundle(uint8 playerIdx, PlayerBundle memory bundle)
         external onlyBuilder returns (bool success)
     {
@@ -245,7 +296,7 @@ contract Game is AssetMarket {
             uint16 round_ = _round;
             {
                 bytes32 lastHash = _getPlayerLastBundleHash(playerIdx);
-                if (lastHash != 0 && getRoundFromBundleHash(lastHash) == round_) {
+                if (lastHash != 0 && getRoundFromBundleHash(lastHash) <= round_) {
                     revert BundleAlreadySettledError(playerIdx);
                 }
             }
@@ -254,19 +305,18 @@ contract Game is AssetMarket {
         if (gasleft() < MIN_GAS_PER_BUNDLE_SWAP * bundle.swaps.length + 2e3) {
             revert InsufficientBundleGasError();
         }
-        try this.selfSettleBundle(
-            playerIdx,
-            getIndexFromPlayer(IPlayer(t_currentBuilder.load())),
-            bundle
-        ) {
+        try this.selfSettleBundle(playerIdx, bundle) {
             success = true;
-        } catch {}
+        } catch {
+            // If settlement fails, ignore it.
+        }
         emit BundleSettled(playerIdx, success, bundle);
         return success;
     }
 
-    // Only called by settle().
-    function selfSettleBundle(uint8 playerIdx, uint8 /* builderIdx */, PlayerBundle memory bundle)
+    /// @dev Attempt to settle a bundle. Can only be called by self.
+    ///      Allows the caller (us) to handle a revert.
+    function selfSettleBundle(uint8 playerIdx, PlayerBundle memory bundle)
         external onlySelf
     {
         for (uint256 i; i < bundle.swaps.length; ++i) {
@@ -278,6 +328,9 @@ contract Game is AssetMarket {
         }
     }
 
+    /// @dev Search for a player that either matches the win condition or 
+    ///      is the closest if the maximum number of rounds have been played.
+    ///      Returns `NULL_PLAYER` if none can be found.
     function _findWinner(uint16 round_)
         internal virtual view returns (IPlayer winner)
     {
@@ -304,6 +357,7 @@ contract Game is AssetMarket {
         return _playerByIdx[maxBalancePlayerIdx];
     }
 
+    /// @dev Get the maximum amount of a non-gold asset for a player.
     function _getMaxNonGoldAssetForPlayer(uint8 playerIdx)
         internal view returns (uint8 assetIdx, uint256 balance)
     {
@@ -317,14 +371,19 @@ contract Game is AssetMarket {
         }
     }
 
+    /// @dev Cleans the "winner found" upper bits from the raw round
+    ///      counter (`_round`).
     function _getTrueRoundCount(uint16 rawRound) private pure returns (uint16 round_) {
         return rawRound & 0x8000 != 0 ? ~rawRound : rawRound;
     }
 
+    /// @dev Esnure an asset index is valid.
     function _assertValidAsset(uint8 assetIdx) private view {
         require(assetIdx < ASSET_COUNT, InvalidAssetError());
     }
 
+    /// @dev Asks each player to create a bundle for the round under
+    ///      the given builder.
     function _getPlayerBundles(uint8 builderIdx)
         internal returns (PlayerBundle[] memory bundles)
     {
@@ -337,6 +396,8 @@ contract Game is AssetMarket {
             {
                 bundles[playerIdx] = bundle;
             } catch (bytes memory errData) {
+                // createBundle() failed. Treat it as if the player returned
+                // nothing.
                 emit CreateBundleFailed(playerIdx, builderIdx, errData);
                 continue;
             }
@@ -345,6 +406,7 @@ contract Game is AssetMarket {
         }
     }
 
+    /// @dev Simulates a player building the current block.
     function _simulateBuildPlayerBlock(uint8 builderIdx)
         internal returns (uint256 bid)
     {
@@ -365,6 +427,8 @@ contract Game is AssetMarket {
         }
     }
 
+    /// @dev Build the current block as player `builderIdx`.
+    ///      Reverts from player callbacks will either be wrapped or ignored.
     function _buildPlayerBlock(uint8 builderIdx)
         internal returns (uint256 bid)
     {
@@ -385,16 +449,24 @@ contract Game is AssetMarket {
             uint16 round_ = _round;
             for (uint8 playerIdx; playerIdx < bundles.length; ++playerIdx) {
                 if (playerIdx != builderIdx) {
-                    if (_getPlayerLastBundleHash(playerIdx) != getBundleHash(bundles[playerIdx], round_)) {
+                    // If the builder did not settle this player's bundle
+                    // or modified this player's bundle, revert.
+                    if (_getPlayerLastBundleHash(playerIdx) !=
+                        getBundleHash(bundles[playerIdx], round_))
+                    {
                         revert BundleNotSettledError(builderIdx, playerIdx);
                     }
                 }
             }
+            // Burn the bid. This will revert if the player does not have
+            // enough gold.
             _burn(builderIdx, GOLD_IDX, bid);
         }
         t_currentBuilder.store(address(NULL_PLAYER));
     }
 
+    /// @dev Safely call a player's `buildBlock()` function, with fixed gas,
+    ///      returnData limits, and without bubbling up reverts.
     function _safeCallPlayerBuild(IPlayer builder, PlayerBundle[] memory bundles)
         internal returns (bool success, uint256 bid, bytes memory errData)
     {
@@ -412,6 +484,9 @@ contract Game is AssetMarket {
         }
     }
 
+    /// @dev Safely and externally call a player's `createBundle()` function,
+    ///      with fixed gas, returnData limits, and without bubbling up reverts.
+    ///      Only this contract can call this function.
     function selfCallPlayerCreateBundle(uint8 playerIdx, uint8 builderIdx)
         external onlySelf returns (PlayerBundle memory bundle)
     {
@@ -430,6 +505,9 @@ contract Game is AssetMarket {
         }
     }
 
+    /// @dev Auction the current block to all players.
+    ///      We will simulate the block being built by each player and
+    ///      chose the player with the highest (successful) bid.
     function _auctionBlock()
         internal virtual returns (uint8 builderIdx, uint256 builderBid)
     {
@@ -446,6 +524,9 @@ contract Game is AssetMarket {
         }
     }
 
+    /// @dev Build the block for the round by conducting a builder auction.
+    ///      If no one wins (they all bid or fail), an empty block occurs, 
+    ///      which means NO bundles are settled this round.
     function _buildBlock() internal {
         (uint8 builderIdx, uint256 builderBid) = _auctionBlock();
         if (builderIdx != INVALID_PLAYER_IDX && builderBid != 0) {
@@ -458,9 +539,9 @@ contract Game is AssetMarket {
         }
     }
 
+    /// @dev Grant each player an equal amount of assets.
     function _distributeIncome() internal virtual {
         uint8 numAssets = ASSET_COUNT;
-        // Mint 1 unit of each type of asset to each player.
         for (uint8 playerIdx; playerIdx < playerCount; ++playerIdx) {
             for (uint8 assetIdx; assetIdx < numAssets; ++assetIdx) {
                 _mint({playerIdx: playerIdx, assetIdx: assetIdx, assetAmount: INCOME_AMOUNT});
@@ -468,12 +549,14 @@ contract Game is AssetMarket {
         }
     }
 
+    /// @dev Mint an asset for a player.
     function _mint(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) internal {
         _assertValidAsset(assetIdx);
         balanceOf[playerIdx][assetIdx] += assetAmount;
         emit Mint(playerIdx, assetIdx, assetAmount);
     }
 
+    /// @dev Burn an asset from a player.
     function _burn(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) internal {
         _assertValidAsset(assetIdx);
         uint256 bal = balanceOf[playerIdx][assetIdx];
@@ -484,16 +567,7 @@ contract Game is AssetMarket {
         emit Burn(playerIdx, assetIdx, assetAmount);
     }
 
-    function _getPlayerLastBundleHash(uint8 playerIdx)
-        private view returns (bytes32 hash)
-    {
-        return t_playerBundleHash.load(playerIdx);
-    }
-
-    function _setPlayerLastBundleHash(uint8 playerIdx, bytes32 hash) private {
-        t_playerBundleHash.store(playerIdx, hash);
-    }
-
+    /// @dev Sell an asset as a player.
     function _sellAs(uint8 playerIdx, uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount)
         internal returns (uint256 toAmount)
     {
@@ -505,6 +579,7 @@ contract Game is AssetMarket {
         emit Swap(playerIdx, fromAssetIdx, toAssetIdx, fromAmount, toAmount);
     }
 
+    /// @dev Buy an asset as a player.
     function _buyAs(uint8 playerIdx, uint8 fromAssetIdx, uint8 toAssetIdx, uint256 toAmount)
         internal returns (uint256 fromAmount)
     {
@@ -514,5 +589,15 @@ contract Game is AssetMarket {
         _burn(playerIdx, fromAssetIdx, fromAmount);
         _mint(playerIdx, toAssetIdx, toAmount);
         emit Swap(playerIdx, fromAssetIdx, toAssetIdx, fromAmount, toAmount);
+    }
+
+    function _getPlayerLastBundleHash(uint8 playerIdx)
+        private view returns (bytes32 hash)
+    {
+        return t_playerBundleHash.load(playerIdx);
+    }
+
+    function _setPlayerLastBundleHash(uint8 playerIdx, bytes32 hash) private {
+        t_playerBundleHash.store(playerIdx, hash);
     }
 }
