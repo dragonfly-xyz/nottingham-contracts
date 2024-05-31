@@ -187,6 +187,15 @@ contract MarketTest is Test {
         }
     }
 
+    function test_abcEqualsAc() external {
+        TestMarket m = createTestMarket(3);
+        for (uint256 i; i < 3; ++i) {
+            uint256 aToC = m.quoteSell(0, 2, 1e18);
+            uint256 aToBToC = m.sell(1, 2, m.sell(0, 1, 1e18));
+            assertEq(aToC, aToBToC);
+        }
+    }
+
     function _assertK(TestMarket market) private {
         uint256 initialK = market.INITIAL_K();
         uint256 k = market.k();
