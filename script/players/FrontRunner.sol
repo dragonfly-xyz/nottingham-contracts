@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8;
 
-import { Game, IPlayer, PlayerBundle, SwapSell, GOLD_IDX } from '~/game/Game.sol';
-import { Passive } from './Passive.sol';
+import '~/game/IGame.sol';
+import './Passive.sol';
 
 // Player that tries to buy whichever good it has the most of
 // AND tries to perform its swaps before everyone else.
@@ -16,7 +16,7 @@ contract FrontRunner is Passive {
     function createBundle(uint8 /* builderIdx */)
         external override returns (PlayerBundle memory bundle)
     {
-        Game game = Game(msg.sender);
+        IGame game = IGame(msg.sender);
         uint8 assetCount = game.assetCount();
         uint8 targetAsset = _getGoodWithMaxBalance(game);
         bundle.swaps = new SwapSell[](assetCount);
@@ -36,10 +36,10 @@ contract FrontRunner is Passive {
     function buildBlock(PlayerBundle[] memory bundles)
         external override returns (uint256 goldBid)
     {
-        Game game = Game(msg.sender);
+        IGame game = IGame(msg.sender);
         // Execute our swaps first. Cut the gold amount by half so we
         // have something to bid.
-        // We could make calls to Game.sell() or Game.buy() directly here
+        // We could make calls to IGame.sell() or IGame.buy() directly here
         // but for simplicity we'll just edit our own bundle and settle it.
         // The game only allows us to edit our own bundles.
         bundles[PLAYER_IDX].swaps[GOLD_IDX].fromAmount =
@@ -55,7 +55,7 @@ contract FrontRunner is Passive {
         return game.balanceOf(PLAYER_IDX, GOLD_IDX);
     }
 
-    function _getGoodWithMaxBalance(Game game)
+    function _getGoodWithMaxBalance(IGame game)
         private view returns (uint8 maxAssetIdx)
     {
         uint8 assetCount = game.assetCount();

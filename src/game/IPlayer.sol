@@ -24,22 +24,22 @@ interface IPlayer {
 
     /// @notice Create a bundle of swaps for the round. The current builder's player
     ///         index will be passed in.
-    /// @dev This will be called for with each player as the builder, but state will
-    ///      only persist for when `builderIdx` matches the builder that wins
-    ///      the block auction. Thwe block builder must settle all bundles and
-    ///      bundles are atomic. If this function reverts, it will be as if this player
-    ///      returned an empty bundle.
+    /// @dev This will be called by the Game for with each player as the builder,
+    ///      but state will only persist for when `builderIdx` matches the builder
+    ///      that wins the block auction. The block builder must settle all bundles
+    ///      (other than their own) and bundles are atomic. If this function reverts,
+    ///      it will be as if this player returned an empty bundle.
     function createBundle(uint8 builderIdx)
         external returns (PlayerBundle memory bundle);
     
     /// @notice Build a block for the round, settling all bundles and returning the
     ///         bid (in gold).
-    /// @dev This will be called for each player, but state will only persist for
-    ///      the player that wins the block auction.
-    ///      If this function reverts, another player's bundle is not settled, or
-    ///      this player does not have enough gold to cover the bid after it returns,
-    ///      this block and bid will be ignored, letting the next highest bidder
-    ///      win the block auction.
+    /// @dev This will be called by the Game for each player, but state will
+    ///      only persist for the player that wins the block auction.
+    ///      If this function reverts, another player's bundle is not settled, another
+    ///      player's bundle has been altered, or this player does not have enough gold
+    ///      to cover the bid after it returns, this block and bid will be ignored,
+    ///      letting the next highest bidder win the block auction.
     function buildBlock(PlayerBundle[] calldata bundles)
         external returns (uint256 goldBid);
 }

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8;
 
-import { Game, IPlayer, PlayerBundle, SwapSell, GOLD_IDX } from '~/game/Game.sol';
-import { Passive } from './Passive.sol';
+import '~/game/IGame.sol';
+import './Passive.sol';
 
 // Player that keeps trying to buy a single good.
 contract SimpleBuyer is Passive {
@@ -17,7 +17,7 @@ contract SimpleBuyer is Passive {
     function createBundle(uint8 /* builderIdx */)
         external override returns (PlayerBundle memory bundle)
     {
-        Game game = Game(msg.sender);
+        IGame game = IGame(msg.sender);
         uint8 assetCount = game.assetCount();
         bundle.swaps = new SwapSell[](assetCount - 1);
         // Convert all non-gold assets to target asset.

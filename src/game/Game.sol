@@ -6,22 +6,27 @@ import { LibBytes } from './LibBytes.sol';
 import { LibAddress } from './LibAddress.sol';
 import { IPlayer, PlayerBundle, SwapSell } from './IPlayer.sol';
 import { SafeCreate2 } from './SafeCreate2.sol';
+import { IGame } from './IGame.sol';
 import './Constants.sol';
 import './GameUtils.sol';
+import './Transient.sol';
 
 /// @notice A friendly game of Searchers of Nottingham.
 /// @dev One instance is deployed per game.
-contract Game is AssetMarket {
+contract Game is IGame, AssetMarket {
     using LibBytes for bytes;
     using LibAddress for address;
     
     /// @dev Transient bytes32 array to remember player bundle hashes
     ///      during a block.
-    TransientArray_Bytes32 internal constant t_playerBundleHash = TransientArray_Bytes32.wrap(1);
+    TransientArray_Bytes32 internal constant t_playerBundleHash =
+        TransientArray_Bytes32.wrap(1);
     /// @dev Transient bool reentrancy guard for playRound().
-    TransientBool internal constant t_inRound = TransientBool.wrap(2);
+    TransientBool internal constant t_inRound =
+        TransientBool.wrap(2);
     /// @dev Transient address indicating current builder during a block.
-    TransientAddress internal constant t_currentBuilder = TransientAddress.wrap(3);
+    TransientAddress internal constant t_currentBuilder =
+        TransientAddress.wrap(3);
 
     /// @notice Who can call playRound().
     address public immutable gm;
@@ -31,7 +36,7 @@ contract Game is AssetMarket {
     ///      Warning: Upper bits will be set when the game has encountered
     ///      a win state.
     uint16 internal _round;
-    /// @dev The last winning bid for the previous round. Will be 0 if there
+    /// @notice The last winning bid for the previous round. Will be 0 if there
     ///      was no builder.
     uint256 public lastWinningBid;
     /// @notice Balance of a player's asset (goods or gold).
@@ -151,15 +156,13 @@ contract Game is AssetMarket {
         }
     }
 
-    /// @notice Return the player index that matches the win condition.
-    ///         Returns `INVALID_PLAYER_IDX` if no player has met the win condition.
+    /// @inheritdoc IGame
     function findWinner() external view returns (uint8 winnerIdx) {
         IPlayer winner = _findWinner(_round);
         return winner == NULL_PLAYER ? INVALID_PLAYER_IDX : getIndexFromPlayer(winner);
     }
 
-    /// @notice Get the respective scores of each player.
-    /// @dev The score is the maximum balance of each goods (non-gold) token of a player.
+    /// @inheritdoc IGame
     function scorePlayers() external view returns (uint256[] memory scores) {
         scores = new uint256[](playerCount);
         for (uint8 playerIdx; playerIdx < scores.length; ++playerIdx) {
@@ -167,20 +170,17 @@ contract Game is AssetMarket {
         }
     }
 
-    /// @notice Get the current round index.
-    /// @dev Always <= MAX_ROUNDS.
+    /// @inheritdoc IGame
     function round() public view returns (uint16 round_) {
         return _getTrueRoundCount(_round);
     }
 
-    /// @notice Get the number of kinds of assets (tokens) in the market. Goods + gold.
-    /// @dev This is always equal to `playerCount`.
+    /// @inheritdoc IGame
     function assetCount() external view returns (uint8) {
         return ASSET_COUNT;
     }
 
-    /// @notice Whether a winner has been declared or the maximum number
-    ///         of rounds have been played.
+    /// @inheritdoc IGame
     function isGameOver() public view returns (bool) {
         // Upper bit in `_rounds` will be set if a winner is found at the
         // end of playRound() so this expression will be true either if
@@ -189,9 +189,7 @@ contract Game is AssetMarket {
         return _round >= MAX_ROUNDS;
     }
 
-    /// @notice Compute how much `toAssetIdx` asset you would get if you sold
-    ///         `fromAmount` of `fromAssetIdx` asset.
-    /// @dev Can revert if the swap depletes nearly all liquidity.
+    /// @inheritdoc IGame
     function quoteSell(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount)
         external view returns (uint256 toAmount)
     {
@@ -200,9 +198,7 @@ contract Game is AssetMarket {
         return AssetMarket._quoteSell(fromAssetIdx, toAssetIdx, fromAmount);
     }
 
-    /// @notice Compute how much `fromAssetIdx` asset you would sell if you bought
-    ///         `tomAmount` of `toAssetIdx` asset.
-    /// @dev Can revert if the swap depletes nearly all liquidity.
+    /// @inheritdoc IGame
     function quoteBuy(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 toAmount)
         external view returns (uint256 fromAmount)
     {
@@ -211,7 +207,7 @@ contract Game is AssetMarket {
         return AssetMarket._quoteBuy(fromAssetIdx, toAssetIdx, toAmount);
     }
 
-    /// @notice Returns the supply of each asset pool in the market.
+    /// @inheritdoc IGame
     function marketState() external view returns (uint256[] memory reserves) {
         reserves = new uint256[](ASSET_COUNT);
         for (uint8 assetIdx; assetIdx < ASSET_COUNT; ++assetIdx) {
@@ -221,8 +217,9 @@ contract Game is AssetMarket {
     }
 
     /// @notice Play a game round.
-    /// @dev Can not be called again if a winner is found or if the maximum
-    ///      number of rounds have been played.
+    /// @dev May only be called by the game master.
+    ///      Cannot be called again if a winner is found in a prior round 
+    ///      or if the maximum number of rounds have been played.
     function playRound() external onlyGameMaster returns (uint8 winnerIdx) {
         require(!t_inRound.load(), AlreadyInRoundError());
         t_inRound.store(true);
@@ -249,11 +246,7 @@ contract Game is AssetMarket {
         }
     }
 
-    /// @notice Directly sell `fromAmount` of `fromAssetIdx` asset for `toAssetIdx`
-    ///         and return how much of `toAssetIdx` was bought.
-    /// @dev Can revert if the swap depletes nearly all liquidity.
-    ///      Can only be called by the current block builder.
-    ///      Other players must perform swaps using bundles.
+    /// @inheritdoc IGame
     function sell(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 fromAmount)
         external onlyBuilder returns (uint256 toAmount)
     {
@@ -262,11 +255,7 @@ contract Game is AssetMarket {
         return _sellAs(playerIdx, fromAssetIdx, toAssetIdx, fromAmount);
     }
 
-    /// @notice Directly buy `toAmount` of `toAssetIdx` asset for `fromAssetIdx`
-    ///         and return how much of `fromAssetIdx` was sold.
-    /// @dev Can revert if the swap depletes nearly all liquidity.
-    ///      Can only be called by the current block builder.
-    ///      Other players must perform swaps using bundles.
+    /// @inheritdoc IGame
     function buy(uint8 fromAssetIdx, uint8 toAssetIdx, uint256 toAmount)
         external onlyBuilder returns (uint256 fromAmount)
     {
@@ -282,12 +271,7 @@ contract Game is AssetMarket {
         revert BuildPlayerBlockAndRevertSuccess(_buildPlayerBlock(builderIdx));
     }
 
-    /// @notice As a builder, settle another player's swap bundle.
-    /// @dev This will perform all the swaps in the bundle in order.
-    ///      If any of the swaps in the bundle revert, the entire bundle
-    ///      reverts, but the block will still be valid. The builder cannot
-    ///      modify another player's bundle without causing their
-    ///      block to be discarded.
+    /// @inheritdoc IGame
     function settleBundle(uint8 playerIdx, PlayerBundle memory bundle)
         external onlyBuilder returns (bool success)
     {
