@@ -40,7 +40,8 @@ contract Game is IGame, AssetMarket {
     ///      was no builder.
     uint256 public lastWinningBid;
     /// @notice Balance of a player's asset (goods or gold).
-    mapping (uint8 playerIdx => mapping (uint8 assetIdx => uint256 balance)) public balanceOf;
+    mapping (uint8 playerIdx => mapping (uint8 assetIdx => uint256 balance)) public
+        balanceOf;
     /// @dev Map of player idxs to addresses.
     mapping (uint8 playerIdx => IPlayer player) internal  _playerByIdx;
 
@@ -528,7 +529,13 @@ contract Game is IGame, AssetMarket {
         uint8 numAssets = ASSET_COUNT;
         for (uint8 playerIdx; playerIdx < playerCount; ++playerIdx) {
             for (uint8 assetIdx; assetIdx < numAssets; ++assetIdx) {
-                _mint({playerIdx: playerIdx, assetIdx: assetIdx, assetAmount: INCOME_AMOUNT});
+                _mint({
+                    playerIdx: playerIdx,
+                    assetIdx: assetIdx,
+                    assetAmount: assetIdx == GOLD_IDX
+                        ? GOLD_INCOME_AMOUNT
+                        : GOODS_INCOME_AMOUNT
+                });
             }
         }
     }
@@ -536,6 +543,7 @@ contract Game is IGame, AssetMarket {
     /// @dev Mint an asset for a player.
     function _mint(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) internal {
         _assertValidAsset(assetIdx);
+        if (assetAmount == 0) return;
         balanceOf[playerIdx][assetIdx] += assetAmount;
         emit Mint(playerIdx, assetIdx, assetAmount);
     }
@@ -543,6 +551,7 @@ contract Game is IGame, AssetMarket {
     /// @dev Burn an asset from a player.
     function _burn(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) internal {
         _assertValidAsset(assetIdx);
+        if (assetAmount == 0) return;
         uint256 bal = balanceOf[playerIdx][assetIdx];
         require(bal >= assetAmount, InsufficientBalanceError(playerIdx, assetIdx));
         unchecked {

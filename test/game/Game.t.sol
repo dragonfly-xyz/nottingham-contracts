@@ -12,7 +12,8 @@ import {
     MIN_WINNING_ASSET_BALANCE,
     GOLD_IDX,
     INVALID_PLAYER_IDX,
-    INCOME_AMOUNT,
+    GOLD_INCOME_AMOUNT,
+    GOODS_INCOME_AMOUNT,
     PLAYER_BUILD_BLOCK_GAS_BASE,
     PLAYER_BUILD_BLOCK_GAS_PER_PLAYER,
     MIN_GAS_PER_BUNDLE_SWAP
@@ -193,7 +194,10 @@ contract GameTest is Test {
         game.__distributeIncome();
         for (uint8 playerIdx; playerIdx < playerCount; ++playerIdx) {
             for (uint8 assetIdx; assetIdx < assetCount; ++assetIdx) {
-                assertEq(game.balanceOf(playerIdx, assetIdx), INCOME_AMOUNT);
+                assertEq(
+                    game.balanceOf(playerIdx, assetIdx),
+                    assetIdx == GOLD_IDX ? GOLD_INCOME_AMOUNT : GOODS_INCOME_AMOUNT
+                );
             }
         }
     }
