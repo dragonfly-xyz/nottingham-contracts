@@ -33,24 +33,24 @@ contract Match is Script {
         require(botNames.length >= MIN_PLAYERS && botNames.length <= MAX_PLAYERS, '# of players');
         PlayerInfo[] memory players = new PlayerInfo[](botNames.length);
         for (uint256 i; i < botNames.length; ++i) {
-            string memory json = vm.readFile(string(abi.encodePacked(
+            string memory json = vm.readFile(string.concat(
                 vm.projectRoot(),
                 '/out/',
                 botNames[i],
                 '.sol/',
                 botNames[i],
                 '.json'
-            )));
+            ));
             players[i].name = botNames[i];
             players[i].creationCode = vm.parseJsonBytes(json, '.bytecode.object');
         }
         (game, playerResults) = runMatch(players);
         {
-            console2.log(string(abi.encodePacked(
+            console2.log(string.concat(
                 unicode'🏁 Game ended after ',
                 vm.toString(game.round()),
                 ' rounds:'
-            )));
+            ));
             for (uint256 i; i < playerResults.length; ++i) {
                 string memory bullet = unicode'🥉';
                 if (i == 0) {
@@ -58,7 +58,7 @@ contract Match is Script {
                 } else if (i == 1) {
                     bullet = unicode'🥈';
                 }
-                console2.log(string(abi.encodePacked(
+                console2.log(string.concat(
                     '\t',
                     bullet,
                     ' \x1b[1m',
@@ -69,7 +69,7 @@ contract Match is Script {
                     _toDecimals(playerResults[i].score),
                     ' ',
                     _toAssetEmoji(playerResults[i].scoreAssetIdx)
-                )));
+                ));
             }
         }
     }
@@ -157,13 +157,13 @@ contract Match is Script {
     function _toAssetEmoji(uint8 assetIdx)
         private pure returns (string memory emoji)
     {
-        if (assetIdx > 6) return string(abi.encodePacked('$', vm.toString(assetIdx)));
-        if (assetIdx == 6) return unicode'🍌';
-        if (assetIdx == 5) return unicode'🍒';
-        if (assetIdx == 4) return unicode'🥑';
-        if (assetIdx == 3) return unicode'🐟️';
-        if (assetIdx == 2) return unicode'🥖';
-        if (assetIdx == 1) return unicode'🍅';
+        if (assetIdx > 6) return string.concat('$', vm.toString(assetIdx));
+        if (assetIdx == 6) return unicode'🍌 (6)';
+        if (assetIdx == 5) return unicode'🍒 (5)';
+        if (assetIdx == 4) return unicode'🥑 (4)';
+        if (assetIdx == 3) return unicode'🐟️ (3)';
+        if (assetIdx == 2) return unicode'🥖 (2)';
+        if (assetIdx == 1) return unicode'🍅 (1)';
         return unicode'🪙';
     }
 }

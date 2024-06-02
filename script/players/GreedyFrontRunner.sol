@@ -5,7 +5,7 @@ import './CheapBuyer.sol';
 
 // Player that tries to buy whichever good it has the most of
 // AND tries to perform its swaps before everyone else.
-contract CheapFrontRunner is CheapBuyer {
+contract GreedyFrontRunner is CheapBuyer {
 
     constructor(IGame game, uint8 playerIdx, uint8 playerCount, uint8 assetCount)
         CheapBuyer(game, playerIdx, playerCount, assetCount) {}
@@ -13,8 +13,8 @@ contract CheapFrontRunner is CheapBuyer {
     function buildBlock(PlayerBundle[] memory bundles)
         external override returns (uint256 goldBid)
     {
-        // Buy whatever asset we can get the most of.
-        uint8 wantAssetIdx = _getMaxBuyableGood();
+        // Buy whatever asset we have the most of.
+        uint8 wantAssetIdx = _getMaxGood();
 
         // Sell 5% of all the other goods for a gold as our block bid and the
         // remaining for the asset we want.
