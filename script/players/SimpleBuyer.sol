@@ -7,8 +7,8 @@ import './BasePlayer.sol';
 contract SimpleBuyer is BasePlayer {
     uint8 immutable WANT_ASSET_IDX;
 
-    constructor(uint8 playerIdx, uint8 playerCount, uint8 assetCount)
-        BasePlayer(playerIdx, playerCount, assetCount)
+    constructor(IGame game, uint8 playerIdx, uint8 playerCount, uint8 assetCount)
+        BasePlayer(game, playerIdx, playerCount, assetCount)
     {
         WANT_ASSET_IDX = (PLAYER_IDX % GOODS_COUNT) + FIRST_GOOD_IDX;
     }

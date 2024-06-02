@@ -93,11 +93,11 @@ contract Match is Script {
         }
         for (uint256 i; i < playerInstances.length; ++i) {
             if (address(playerInstances[i]).code.length == 0) {
-                revert(string(abi.encodePacked(
+                revert(string.concat(
                     'Player "',
                     players[i].name,
                     '" failed to deploy!'
-                )));
+                ));
             }
         }
         uint8 winnerIdx = INVALID_PLAYER_IDX;
@@ -151,7 +151,7 @@ contract Match is Script {
     {
         uint256 whole = weis / 1e18;
         uint256 frac = weis - (whole * 1e18);
-        return string(abi.encodePacked(vm.toString(whole), '.', vm.toString(frac)));
+        return string.concat(vm.toString(whole), '.', vm.toString(frac));
     }
 
     function _toAssetEmoji(uint8 assetIdx)

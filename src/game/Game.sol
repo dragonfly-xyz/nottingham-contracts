@@ -119,9 +119,9 @@ contract Game is IGame, AssetMarket {
         // Deploy players.
         playerCount = uint8(playerCreationCodes.length);
         {
-            bytes memory initArgs = abi.encode(0, playerCount, ASSET_COUNT);
+            bytes memory initArgs = abi.encode(this, 0, playerCount, ASSET_COUNT);
             for (uint8 i; i < playerCount; ++i) {
-                assembly ('memory-safe') { mstore(add(initArgs, 0x20), i) }
+                assembly ('memory-safe') { mstore(add(initArgs, 0x40), i) }
 
                 IPlayer player;
                 try sc2.safeCreate2{gas: MAX_CREATION_GAS}(
@@ -281,7 +281,7 @@ contract Game is IGame, AssetMarket {
             uint16 round_ = _round;
             {
                 bytes32 lastHash = _getPlayerLastBundleHash(playerIdx);
-                if (lastHash != 0 && getRoundFromBundleHash(lastHash) <= round_) {
+                if (lastHash != 0 && getRoundFromBundleHash(lastHash) >= round_) {
                     revert BundleAlreadySettledError(playerIdx);
                 }
             }

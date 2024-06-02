@@ -70,7 +70,7 @@ library LibMatchUtils {
         bytes32 initCodeHash =
             keccak256(abi.encodePacked(
                 creationCode,
-                abi.encode(playerIdx, playerCount, playerCount)
+                abi.encode(game, playerIdx, playerCount, playerCount)
             ));
         unchecked {
             for (salt = uint256(seed); true; ++salt) {

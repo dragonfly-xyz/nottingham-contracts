@@ -7,8 +7,8 @@ import './GreedyBuyer.sol';
 // AND tries to perform its swaps before everyone else.
 contract GreedyFrontRunner is GreedyBuyer {
 
-    constructor(uint8 playerIdx, uint8 playerCount, uint8 assetCount)
-        GreedyBuyer(playerIdx, playerCount, assetCount) {}
+    constructor(IGame game, uint8 playerIdx, uint8 playerCount, uint8 assetCount)
+        GreedyBuyer(game, playerIdx, playerCount, assetCount) {}
 
     function buildBlock(PlayerBundle[] memory bundles)
         external override returns (uint256 goldBid)

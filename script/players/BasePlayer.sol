@@ -12,8 +12,8 @@ contract BasePlayer is IPlayer {
     uint8 internal immutable ASSET_COUNT;
     uint8 internal immutable GOODS_COUNT;
     
-    constructor(uint8 playerIdx, uint8 playerCount, uint8 assetCount) {
-        GAME = IGame(msg.sender);
+    constructor(IGame game, uint8 playerIdx, uint8 playerCount, uint8 assetCount) {
+        GAME = game;
         PLAYER_IDX = playerIdx;
         PLAYER_COUNT = playerCount;
         ASSET_COUNT = assetCount;

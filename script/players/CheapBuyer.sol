@@ -6,8 +6,8 @@ import './BasePlayer.sol';
 // Player that buys whatever good we can get the most of each round.
 contract CheapBuyer is BasePlayer {
 
-    constructor(uint8 playerIdx, uint8 playerCount, uint8 assetCount)
-            BasePlayer(playerIdx, playerCount, assetCount) {}
+    constructor(IGame game, uint8 playerIdx, uint8 playerCount, uint8 assetCount)
+            BasePlayer(game, playerIdx, playerCount, assetCount) {}
 
     function createBundle(uint8 /* builderIdx */)
         external override returns (PlayerBundle memory bundle)

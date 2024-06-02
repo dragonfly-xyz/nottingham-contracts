@@ -1081,7 +1081,7 @@ contract NoopPlayer is IPlayer {
     uint8 immutable PLAYER_COUNT;
     uint8 immutable ASSET_COUNT;
 
-    constructor(uint8 playerIdx, uint8 playerCount, uint8 assetCount) {
+    constructor(Game, uint8 playerIdx, uint8 playerCount, uint8 assetCount) {
         PLAYER_IDX = playerIdx;
         PLAYER_COUNT = playerCount;
         ASSET_COUNT = assetCount;
@@ -1118,8 +1118,8 @@ contract CallbackPlayer is NoopPlayer {
 
     mapping (bytes4 playerFnSelector => Call[]) _calls;
     
-    constructor(uint8 playerIdx, uint8 playerCount, uint8 assetCount)
-        NoopPlayer(playerIdx, playerCount, assetCount) {}
+    constructor(Game game, uint8 playerIdx, uint8 playerCount, uint8 assetCount)
+        NoopPlayer(game, playerIdx, playerCount, assetCount) {}
     
     function addCallback(bytes4 playerFnSelector, address target, bytes calldata data) external {
         _calls[playerFnSelector].push(Call(target, data));
@@ -1163,8 +1163,8 @@ contract StateTrackingPlayer is NoopPlayer {
     event CreateBundleState(uint8 playerIdx, uint8 builderIdx, bytes32 h);
     event BuildBlockState(uint8 builderIdx, bytes32 h);
 
-    constructor(uint8 playerIdx, uint8 playerCount, uint8 assetCount)
-        NoopPlayer(playerIdx, playerCount, assetCount) {}
+    constructor(Game game, uint8 playerIdx, uint8 playerCount, uint8 assetCount)
+        NoopPlayer(game, playerIdx, playerCount, assetCount) {}
 
     function createBundle(uint8 builderIdx)
         public override returns (PlayerBundle memory bundle)
@@ -1211,8 +1211,8 @@ contract TestPlayer is CallbackPlayer {
     uint256 public bid;
     PlayerBundle _bundle;
 
-    constructor(uint8 playerIdx, uint8 playerCount, uint8 assetCount)
-        CallbackPlayer(playerIdx, playerCount, assetCount) {}
+    constructor(Game game, uint8 playerIdx, uint8 playerCount, uint8 assetCount)
+        CallbackPlayer(game, playerIdx, playerCount, assetCount) {}
 
     function createBundle(uint8 builderIdx)
         public override returns (PlayerBundle memory bundle)
