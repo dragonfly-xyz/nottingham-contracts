@@ -280,7 +280,7 @@ contract Game is IGame, AssetMarket {
             uint16 round_ = _round;
             {
                 bytes32 lastHash = _getPlayerLastBundleHash(playerIdx);
-                if (lastHash != 0 && getRoundFromBundleHash(lastHash) <= round_) {
+                if (lastHash != 0 && getRoundFromBundleHash(lastHash) >= round_) {
                     revert BundleAlreadySettledError(playerIdx);
                 }
             }
