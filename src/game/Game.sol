@@ -486,7 +486,7 @@ contract Game is IGame, AssetMarket {
             resultData.rawRevert();
         } else {
             bundle = abi.decode(resultData, (PlayerBundle));
-            require(bundle.swaps.length <= ASSET_COUNT, TooManySwapsError());
+            require(bundle.swaps.length <= ASSET_COUNT ** 2, TooManySwapsError());
         }
     }
 

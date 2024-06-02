@@ -13,7 +13,7 @@ contract CheapBuyer is BasePlayer {
         external override returns (PlayerBundle memory bundle)
     {
         bundle.swaps = new SwapSell[](ASSET_COUNT);
-        uint8 wantAssetIdx = _findMaxBuyableGood();
+        uint8 wantAssetIdx = _getMaxBuyableGood();
         for (uint8 i; i < GOODS_COUNT; ++i) {
             uint8 assetIdx = FIRST_GOOD_IDX + i;
             if (assetIdx != wantAssetIdx) {
@@ -27,8 +27,8 @@ contract CheapBuyer is BasePlayer {
     }
 
     // Find the good we can buy the most of with all our other tokens.
-    function _findMaxBuyableGood()
-        private view returns (uint8 maxToAssetIdx)
+    function _getMaxBuyableGood()
+        internal view returns (uint8 maxToAssetIdx)
     {
         uint256 maxToAmount = 0;
         maxToAssetIdx = FIRST_GOOD_IDX;
