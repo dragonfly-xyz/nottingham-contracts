@@ -19,8 +19,8 @@ struct PlayerBundle {
 /// @notice Interface a player contract should implement.
 interface IPlayer {
     // The implementing contract should also implement the following
-    // constructor:
-    // constructor(uint8 playerIdx, uint8 playerCount);
+    // constructor.
+    // constructor(uint8 playerIdx, uint8 playerCount, uint8 assetCount);
 
     /// @notice Create a bundle of swaps for the round. The current builder's player
     ///         index will be passed in.

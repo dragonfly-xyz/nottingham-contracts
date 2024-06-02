@@ -102,7 +102,9 @@ contract Game is IGame, AssetMarket {
         bytes[] memory playerCreationCodes,
         uint256[] memory deploySalts
     )
-        AssetMarket(uint8(playerCreationCodes.length)) // num Assets = player count
+        // There will be n-player assets (incl gold) in the market to ensure
+        // at least one asset will be in contention.
+        AssetMarket(uint8(playerCreationCodes.length))
     {
         require(
             playerCreationCodes.length == deploySalts.length,
@@ -117,7 +119,7 @@ contract Game is IGame, AssetMarket {
         // Deploy players.
         playerCount = uint8(playerCreationCodes.length);
         {
-            bytes memory initArgs = abi.encode(0, playerCount);
+            bytes memory initArgs = abi.encode(0, playerCount, ASSET_COUNT);
             for (uint8 i; i < playerCount; ++i) {
                 assembly ('memory-safe') { mstore(add(initArgs, 0x20), i) }
 
@@ -145,8 +147,6 @@ contract Game is IGame, AssetMarket {
         }
         // Initialize the market.
         {
-            // There will be n-player assets (incl gold) in the market to ensure
-            // at least one asset will be in contention.
             uint8 assetCount_ = uint8(ASSET_COUNT);
             uint256[] memory assetReserves = new uint256[](assetCount_);
             assetReserves[GOLD_IDX] = MARKET_STARTING_GOLD_PER_PLAYER * playerCount;

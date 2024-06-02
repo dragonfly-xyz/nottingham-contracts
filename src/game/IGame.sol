@@ -25,7 +25,7 @@ interface IGame {
     /// @dev Always <= MAX_ROUNDS.
     function round() external view returns (uint16 round_);
     /// @notice Get the number of kinds of assets (tokens) in the market. Goods + gold.
-    /// @dev This is always equal to `playerCount`.
+    /// @dev This is always equal to `playerCount` and can never go below `MIN_PLAYERS` (2).
     function assetCount() external view returns (uint8);
     /// @notice Whether a winner has been declared or the maximum number
     ///         of rounds have been played.

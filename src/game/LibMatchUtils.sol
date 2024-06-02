@@ -68,7 +68,10 @@ library LibMatchUtils {
         internal pure returns (uint256 salt, address addr)
     {
         bytes32 initCodeHash =
-            keccak256(abi.encodePacked(creationCode, abi.encode(playerIdx, playerCount)));
+            keccak256(abi.encodePacked(
+                creationCode,
+                abi.encode(playerIdx, playerCount, playerCount)
+            ));
         unchecked {
             for (salt = uint256(seed); true; ++salt) {
                 uint256 create2Salt = uint256(keccak256(abi.encode(salt, game)));
