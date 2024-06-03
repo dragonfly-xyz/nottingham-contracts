@@ -12,7 +12,8 @@ import {
     MIN_WINNING_ASSET_BALANCE,
     GOLD_IDX,
     INVALID_PLAYER_IDX,
-    INCOME_AMOUNT,
+    GOLD_INCOME_AMOUNT,
+    GOODS_INCOME_AMOUNT,
     PLAYER_BUILD_BLOCK_GAS_BASE,
     PLAYER_BUILD_BLOCK_GAS_PER_PLAYER,
     MIN_GAS_PER_BUNDLE_SWAP
@@ -135,7 +136,7 @@ contract GameTest is Test {
         assertEq(winnerIdx, INVALID_PLAYER_IDX);
     }
 
-    function test_canCompleteGameWithNoopPlayers() external {
+    function test_gameEndsWithNoopPlayers() external {
         (TestGame game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode
@@ -148,7 +149,7 @@ contract GameTest is Test {
         assertEq(winnerIdx, 0);
         (uint8 assetIdx, uint256 bal) = _getMaxNonGoldAssetBalance(game, winnerIdx);
         assertTrue(assetIdx != GOLD_IDX);
-        assertGe(bal, MIN_WINNING_ASSET_BALANCE);
+        assertLt(bal, MIN_WINNING_ASSET_BALANCE);
         assertTrue(game.isGameOver());
     }
 
@@ -193,7 +194,10 @@ contract GameTest is Test {
         game.__distributeIncome();
         for (uint8 playerIdx; playerIdx < playerCount; ++playerIdx) {
             for (uint8 assetIdx; assetIdx < assetCount; ++assetIdx) {
-                assertEq(game.balanceOf(playerIdx, assetIdx), INCOME_AMOUNT);
+                assertEq(
+                    game.balanceOf(playerIdx, assetIdx),
+                    assetIdx == GOLD_IDX ? GOLD_INCOME_AMOUNT : GOODS_INCOME_AMOUNT
+                );
             }
         }
     }
@@ -1075,10 +1079,12 @@ contract TestGame is Game {
 contract NoopPlayer is IPlayer {
     uint8 public immutable PLAYER_IDX;
     uint8 immutable PLAYER_COUNT;
+    uint8 immutable ASSET_COUNT;
 
-    constructor(uint8 playerIdx, uint8 playerCount) {
+    constructor(Game, uint8 playerIdx, uint8 playerCount, uint8 assetCount) {
         PLAYER_IDX = playerIdx;
         PLAYER_COUNT = playerCount;
+        ASSET_COUNT = assetCount;
         emit PlayerCreated(address(this), playerIdx, playerCount);
     }
 
@@ -1112,7 +1118,8 @@ contract CallbackPlayer is NoopPlayer {
 
     mapping (bytes4 playerFnSelector => Call[]) _calls;
     
-    constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
+    constructor(Game game, uint8 playerIdx, uint8 playerCount, uint8 assetCount)
+        NoopPlayer(game, playerIdx, playerCount, assetCount) {}
     
     function addCallback(bytes4 playerFnSelector, address target, bytes calldata data) external {
         _calls[playerFnSelector].push(Call(target, data));
@@ -1156,7 +1163,8 @@ contract StateTrackingPlayer is NoopPlayer {
     event CreateBundleState(uint8 playerIdx, uint8 builderIdx, bytes32 h);
     event BuildBlockState(uint8 builderIdx, bytes32 h);
 
-    constructor(uint8 playerIdx, uint8 playerCount) NoopPlayer(playerIdx, playerCount) {}
+    constructor(Game game, uint8 playerIdx, uint8 playerCount, uint8 assetCount)
+        NoopPlayer(game, playerIdx, playerCount, assetCount) {}
 
     function createBundle(uint8 builderIdx)
         public override returns (PlayerBundle memory bundle)
@@ -1203,7 +1211,8 @@ contract TestPlayer is CallbackPlayer {
     uint256 public bid;
     PlayerBundle _bundle;
 
-    constructor(uint8 playerIdx, uint8 playerCount) CallbackPlayer(playerIdx, playerCount) {}
+    constructor(Game game, uint8 playerIdx, uint8 playerCount, uint8 assetCount)
+        CallbackPlayer(game, playerIdx, playerCount, assetCount) {}
 
     function createBundle(uint8 builderIdx)
         public override returns (PlayerBundle memory bundle)

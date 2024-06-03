@@ -1,39 +1,31 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8;
 
-import '~/game/IGame.sol';
-import './Passive.sol';
+import './BasePlayer.sol';
 
 // Player that keeps trying to buy a single good.
-contract SimpleBuyer is Passive {
-    uint8 immutable PLAYER_IDX;
-    uint8 immutable TARGET_ASSET;
+contract SimpleBuyer is BasePlayer {
+    uint8 immutable WANT_ASSET_IDX;
 
-    constructor(uint8 playerIdx, uint8 playerCount)  {
-        PLAYER_IDX = playerIdx;
-        TARGET_ASSET = (playerIdx % (playerCount - 1)) + 1;
+    constructor(IGame game, uint8 playerIdx, uint8 playerCount, uint8 assetCount)
+        BasePlayer(game, playerIdx, playerCount, assetCount)
+    {
+        WANT_ASSET_IDX = (PLAYER_IDX % GOODS_COUNT) + FIRST_GOOD_IDX;
     }
 
     function createBundle(uint8 /* builderIdx */)
-        external override returns (PlayerBundle memory bundle)
+        external virtual override returns (PlayerBundle memory bundle)
     {
-        IGame game = IGame(msg.sender);
-        uint8 assetCount = game.assetCount();
-        bundle.swaps = new SwapSell[](assetCount - 1);
+        bundle.swaps = new SwapSell[](ASSET_COUNT);
         // Convert all non-gold assets to target asset.
-        for (uint8 i = 1; i < bundle.swaps.length; ++i) {
-            uint8 fromAsset = i >= TARGET_ASSET ? i + 1 : i;
-            bundle.swaps[i - 1] = SwapSell({
-                fromAssetIdx: fromAsset,
-                toAssetIdx: TARGET_ASSET,
-                fromAmount: game.balanceOf(PLAYER_IDX, fromAsset)
+        for (uint8 i; i < GOODS_COUNT; ++i) {
+            uint8 assetIdx = FIRST_GOOD_IDX + i;
+            if (assetIdx == WANT_ASSET_IDX) continue;
+            bundle.swaps[i] = SwapSell({
+                fromAssetIdx: assetIdx,
+                toAssetIdx: WANT_ASSET_IDX,
+                fromAmount: GAME.balanceOf(PLAYER_IDX, assetIdx)
             });
         }
-        // Convert half of gold into target asset.
-        bundle.swaps[bundle.swaps.length - 1] = SwapSell({
-            fromAssetIdx: GOLD_IDX,
-            toAssetIdx: TARGET_ASSET,
-            fromAmount: game.balanceOf(PLAYER_IDX, GOLD_IDX) / 2
-        });
     }
 }

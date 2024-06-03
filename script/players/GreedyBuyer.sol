@@ -1,49 +1,30 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8;
 
-import '~/game/IGame.sol';
-import './Passive.sol';
+import './BasePlayer.sol';
 
 // Player that keeps trying to buy whichever good it has the most of.
-contract GreedyBuyer is Passive {
-    uint8 immutable PLAYER_IDX;
+contract GreedyBuyer is BasePlayer {
 
-    constructor(uint8 playerIdx, uint8 /* playerCount */)  {
-        PLAYER_IDX = playerIdx;
-    }
+    constructor(IGame game, uint8 playerIdx, uint8 playerCount, uint8 assetCount)
+            BasePlayer(game, playerIdx, playerCount, assetCount) {}
 
     function createBundle(uint8 /* builderIdx */)
-        external override returns (PlayerBundle memory bundle)
+        external virtual override returns (PlayerBundle memory bundle)
     {
         IGame game = IGame(msg.sender);
-        uint8 assetCount = game.assetCount();
-        uint8 targetAsset = _getGoodWithMaxBalance(game);
-        bundle.swaps = new SwapSell[](assetCount);
-        // Convert everything to the target asset.
-        for (uint8 fromAsset = GOLD_IDX; fromAsset < bundle.swaps.length; ++fromAsset) {
-            if (fromAsset == targetAsset) {
+        uint8 wantAssetIdx = _getMaxGood();
+        bundle.swaps = new SwapSell[](ASSET_COUNT);
+        // Convert every other good to the target asset.
+        for (uint8 assetIdx = GOLD_IDX + 1; assetIdx < bundle.swaps.length; ++assetIdx) {
+            if (assetIdx == wantAssetIdx) {
                 continue;
             }
-            bundle.swaps[fromAsset] = SwapSell({
-                fromAssetIdx: fromAsset,
-                toAssetIdx: targetAsset,
-                fromAmount: game.balanceOf(PLAYER_IDX, fromAsset)
+            bundle.swaps[assetIdx] = SwapSell({
+                fromAssetIdx: assetIdx,
+                toAssetIdx: wantAssetIdx,
+                fromAmount: game.balanceOf(PLAYER_IDX, assetIdx)
             });
-        }
-    }
-
-    function _getGoodWithMaxBalance(IGame game)
-        private view returns (uint8 maxAssetIdx)
-    {
-        uint8 assetCount = game.assetCount();
-        // Find the good we have the most of.
-        uint256 maxAssetBal = GOLD_IDX + 1;
-        for (uint8 assetIdx = GOLD_IDX + 1; assetIdx < assetCount; ++assetIdx) {
-            uint256 bal = game.balanceOf(PLAYER_IDX, assetIdx);
-            if (bal >= maxAssetBal) {
-                maxAssetBal = bal;
-                maxAssetIdx = assetIdx;
-            }
         }
     }
 }

@@ -36,11 +36,15 @@ contract Game is IGame, AssetMarket {
     ///      Warning: Upper bits will be set when the game has encountered
     ///      a win state.
     uint16 internal _round;
+    /// @notice Player index of the last builder.
+    /// @dev    `INVALID_PLAYER_IDX` if no builder (emtpy block).
+    uint8 public lastBuilder;
     /// @notice The last winning bid for the previous round. Will be 0 if there
     ///      was no builder.
     uint256 public lastWinningBid;
     /// @notice Balance of a player's asset (goods or gold).
-    mapping (uint8 playerIdx => mapping (uint8 assetIdx => uint256 balance)) public balanceOf;
+    mapping (uint8 playerIdx => mapping (uint8 assetIdx => uint256 balance)) public
+        balanceOf;
     /// @dev Map of player idxs to addresses.
     mapping (uint8 playerIdx => IPlayer player) internal  _playerByIdx;
 
@@ -101,7 +105,9 @@ contract Game is IGame, AssetMarket {
         bytes[] memory playerCreationCodes,
         uint256[] memory deploySalts
     )
-        AssetMarket(uint8(playerCreationCodes.length)) // num Assets = player count
+        // There will be n-player assets (incl gold) in the market to ensure
+        // at least one asset will be in contention.
+        AssetMarket(uint8(playerCreationCodes.length))
     {
         require(
             playerCreationCodes.length == deploySalts.length,
@@ -116,9 +122,9 @@ contract Game is IGame, AssetMarket {
         // Deploy players.
         playerCount = uint8(playerCreationCodes.length);
         {
-            bytes memory initArgs = abi.encode(0, playerCount);
+            bytes memory initArgs = abi.encode(this, 0, playerCount, ASSET_COUNT);
             for (uint8 i; i < playerCount; ++i) {
-                assembly ('memory-safe') { mstore(add(initArgs, 0x20), i) }
+                assembly ('memory-safe') { mstore(add(initArgs, 0x40), i) }
 
                 IPlayer player;
                 try sc2.safeCreate2{gas: MAX_CREATION_GAS}(
@@ -144,8 +150,6 @@ contract Game is IGame, AssetMarket {
         }
         // Initialize the market.
         {
-            // There will be n-player assets (incl gold) in the market to ensure
-            // at least one asset will be in contention.
             uint8 assetCount_ = uint8(ASSET_COUNT);
             uint256[] memory assetReserves = new uint256[](assetCount_);
             assetReserves[GOLD_IDX] = MARKET_STARTING_GOLD_PER_PLAYER * playerCount;
@@ -229,7 +233,7 @@ contract Game is IGame, AssetMarket {
         _buildBlock();
         emit RoundPlayed(round_);
         {
-            IPlayer winner = _findWinner(round_);
+            IPlayer winner = _findWinner(round_ + 1);
             if (winner != NULL_PLAYER) {
                 winnerIdx = getIndexFromPlayer(winner);
                 // Invert the round counter to end the game early.
@@ -485,7 +489,11 @@ contract Game is IGame, AssetMarket {
             resultData.rawRevert();
         } else {
             bundle = abi.decode(resultData, (PlayerBundle));
-            require(bundle.swaps.length <= ASSET_COUNT, TooManySwapsError());
+            require(bundle.swaps.length <= ASSET_COUNT * (ASSET_COUNT-1), TooManySwapsError());
+            for (uint256 i; i < bundle.swaps.length; ++i) {
+                _assertValidAsset(bundle.swaps[i].fromAssetIdx);
+                _assertValidAsset(bundle.swaps[i].toAssetIdx);
+            }
         }
     }
 
@@ -515,6 +523,7 @@ contract Game is IGame, AssetMarket {
         (uint8 builderIdx, uint256 builderBid) = _auctionBlock();
         if (builderIdx != INVALID_PLAYER_IDX && builderBid != 0) {
             assert(_buildPlayerBlock(builderIdx) == builderBid);
+            lastBuilder = builderIdx;
             lastWinningBid = builderBid;
             emit BlockBuilt(_round, builderIdx, builderBid);
         } else {
@@ -528,7 +537,13 @@ contract Game is IGame, AssetMarket {
         uint8 numAssets = ASSET_COUNT;
         for (uint8 playerIdx; playerIdx < playerCount; ++playerIdx) {
             for (uint8 assetIdx; assetIdx < numAssets; ++assetIdx) {
-                _mint({playerIdx: playerIdx, assetIdx: assetIdx, assetAmount: INCOME_AMOUNT});
+                _mint({
+                    playerIdx: playerIdx,
+                    assetIdx: assetIdx,
+                    assetAmount: assetIdx == GOLD_IDX
+                        ? GOLD_INCOME_AMOUNT
+                        : GOODS_INCOME_AMOUNT
+                });
             }
         }
     }
@@ -536,6 +551,7 @@ contract Game is IGame, AssetMarket {
     /// @dev Mint an asset for a player.
     function _mint(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) internal {
         _assertValidAsset(assetIdx);
+        if (assetAmount == 0) return;
         balanceOf[playerIdx][assetIdx] += assetAmount;
         emit Mint(playerIdx, assetIdx, assetAmount);
     }
@@ -543,6 +559,7 @@ contract Game is IGame, AssetMarket {
     /// @dev Burn an asset from a player.
     function _burn(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount) internal {
         _assertValidAsset(assetIdx);
+        if (assetAmount == 0) return;
         uint256 bal = balanceOf[playerIdx][assetIdx];
         require(bal >= assetAmount, InsufficientBalanceError(playerIdx, assetIdx));
         unchecked {

@@ -1,34 +1,52 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8;
 
-import '~/game/IGame.sol';
-import './Passive.sol';
+import './BasePlayer.sol';
 
-// Player that buys the cheapest good each round.
-contract CheapBuyer is Passive {
-    uint8 immutable PLAYER_IDX;
+// Player that buys whatever good we can get the most of each round.
+contract CheapBuyer is BasePlayer {
 
-    constructor(uint8 playerIdx, uint8 /* playerCount */)  {
-        PLAYER_IDX = playerIdx;
-    }
+    constructor(IGame game, uint8 playerIdx, uint8 playerCount, uint8 assetCount)
+            BasePlayer(game, playerIdx, playerCount, assetCount) {}
 
     function createBundle(uint8 /* builderIdx */)
-        external override returns (PlayerBundle memory bundle)
+        external virtual override returns (PlayerBundle memory bundle)
     {
-        IGame game = IGame(msg.sender);
-        uint8 assetCount = game.assetCount();
-        // Convert half of gold to cheapest good.
-        bundle.swaps = new SwapSell[](1);
-        SwapSell memory swap = bundle.swaps[0];
-        swap.fromAssetIdx = GOLD_IDX;
-        swap.fromAmount = game.balanceOf(PLAYER_IDX, GOLD_IDX) / 2;
-        swap.toAssetIdx = GOLD_IDX + 1;
+        bundle.swaps = new SwapSell[](ASSET_COUNT);
+        uint8 wantAssetIdx = _getMaxBuyableGood();
+        for (uint8 i; i < GOODS_COUNT; ++i) {
+            uint8 assetIdx = FIRST_GOOD_IDX + i;
+            if (assetIdx != wantAssetIdx) {
+                bundle.swaps[i] = SwapSell({
+                    fromAssetIdx: assetIdx,
+                    toAssetIdx: wantAssetIdx,
+                    fromAmount: GAME.balanceOf(PLAYER_IDX, assetIdx)
+                });
+            }
+        }
+    }
+
+    // Find the good we can buy the most of with all our other tokens.
+    function _getMaxBuyableGood()
+        internal view returns (uint8 maxToAssetIdx)
+    {
         uint256 maxToAmount = 0;
-        for (uint8 toAssetIdx = GOLD_IDX + 1; toAssetIdx < assetCount; ++toAssetIdx) {
-            uint256 toAmount = game.quoteSell(GOLD_IDX, toAssetIdx, swap.fromAmount);
+        maxToAssetIdx = FIRST_GOOD_IDX;
+        for (uint8 i; i < GOODS_COUNT; ++i) {
+            uint8 toAssetIdx = FIRST_GOOD_IDX + i;
+            uint256 toAmount;
+            for (uint8 j; j < GOODS_COUNT; ++j) {
+                uint8 fromAssetIdx = FIRST_GOOD_IDX + j;
+                if (fromAssetIdx == toAssetIdx) continue;
+                toAmount += GAME.quoteSell(
+                    fromAssetIdx,
+                    toAssetIdx,
+                    GAME.balanceOf(PLAYER_IDX, fromAssetIdx)
+                );
+            }
             if (toAmount >= maxToAmount) {
                 maxToAmount = toAmount;
-                swap.toAssetIdx = toAssetIdx;
+                maxToAssetIdx = toAssetIdx;
             }
         }
     }
