@@ -36,6 +36,9 @@ contract Game is IGame, AssetMarket {
     ///      Warning: Upper bits will be set when the game has encountered
     ///      a win state.
     uint16 internal _round;
+    /// @notice Player index of the last builder.
+    /// @dev    `INVALID_PLAYER_IDX` if no builder (emtpy block).
+    uint8 public lastBuilder;
     /// @notice The last winning bid for the previous round. Will be 0 if there
     ///      was no builder.
     uint256 public lastWinningBid;
@@ -230,7 +233,7 @@ contract Game is IGame, AssetMarket {
         _buildBlock();
         emit RoundPlayed(round_);
         {
-            IPlayer winner = _findWinner(round_);
+            IPlayer winner = _findWinner(round_ + 1);
             if (winner != NULL_PLAYER) {
                 winnerIdx = getIndexFromPlayer(winner);
                 // Invert the round counter to end the game early.
@@ -486,7 +489,11 @@ contract Game is IGame, AssetMarket {
             resultData.rawRevert();
         } else {
             bundle = abi.decode(resultData, (PlayerBundle));
-            require(bundle.swaps.length <= ASSET_COUNT ** 2, TooManySwapsError());
+            require(bundle.swaps.length <= ASSET_COUNT * (ASSET_COUNT-1), TooManySwapsError());
+            for (uint256 i; i < bundle.swaps.length; ++i) {
+                _assertValidAsset(bundle.swaps[i].fromAssetIdx);
+                _assertValidAsset(bundle.swaps[i].toAssetIdx);
+            }
         }
     }
 
@@ -516,6 +523,7 @@ contract Game is IGame, AssetMarket {
         (uint8 builderIdx, uint256 builderBid) = _auctionBlock();
         if (builderIdx != INVALID_PLAYER_IDX && builderBid != 0) {
             assert(_buildPlayerBlock(builderIdx) == builderBid);
+            lastBuilder = builderIdx;
             lastWinningBid = builderBid;
             emit BlockBuilt(_round, builderIdx, builderBid);
         } else {

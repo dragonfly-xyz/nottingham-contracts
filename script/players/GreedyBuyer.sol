@@ -10,7 +10,7 @@ contract GreedyBuyer is BasePlayer {
             BasePlayer(game, playerIdx, playerCount, assetCount) {}
 
     function createBundle(uint8 /* builderIdx */)
-        external override returns (PlayerBundle memory bundle)
+        external virtual override returns (PlayerBundle memory bundle)
     {
         IGame game = IGame(msg.sender);
         uint8 wantAssetIdx = _getMaxGood();

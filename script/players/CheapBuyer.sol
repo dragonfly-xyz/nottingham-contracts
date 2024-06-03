@@ -10,7 +10,7 @@ contract CheapBuyer is BasePlayer {
             BasePlayer(game, playerIdx, playerCount, assetCount) {}
 
     function createBundle(uint8 /* builderIdx */)
-        external override returns (PlayerBundle memory bundle)
+        external virtual override returns (PlayerBundle memory bundle)
     {
         bundle.swaps = new SwapSell[](ASSET_COUNT);
         uint8 wantAssetIdx = _getMaxBuyableGood();

@@ -3,7 +3,7 @@ pragma solidity ^0.8;
 
 import './CheapBuyer.sol';
 
-// Player that tries to buy whichever good it has the most of
+// Player that tries to buy whichever good is the cheapest
 // AND tries to perform its swaps before everyone else.
 contract CheapFrontRunner is CheapBuyer {
 
@@ -11,7 +11,7 @@ contract CheapFrontRunner is CheapBuyer {
         CheapBuyer(game, playerIdx, playerCount, assetCount) {}
 
     function buildBlock(PlayerBundle[] memory bundles)
-        external override returns (uint256 goldBid)
+        external virtual override returns (uint256 goldBid)
     {
         // Buy whatever asset we can get the most of.
         uint8 wantAssetIdx = _getMaxBuyableGood();

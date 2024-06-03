@@ -136,7 +136,7 @@ contract GameTest is Test {
         assertEq(winnerIdx, INVALID_PLAYER_IDX);
     }
 
-    function test_canCompleteGameWithNoopPlayers() external {
+    function test_gameEndsWithNoopPlayers() external {
         (TestGame game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode
@@ -149,7 +149,7 @@ contract GameTest is Test {
         assertEq(winnerIdx, 0);
         (uint8 assetIdx, uint256 bal) = _getMaxNonGoldAssetBalance(game, winnerIdx);
         assertTrue(assetIdx != GOLD_IDX);
-        assertGe(bal, MIN_WINNING_ASSET_BALANCE);
+        assertLt(bal, MIN_WINNING_ASSET_BALANCE);
         assertTrue(game.isGameOver());
     }
 

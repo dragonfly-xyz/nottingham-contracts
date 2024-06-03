@@ -12,6 +12,9 @@ interface IGame {
     /// @notice The last winning bid for the previous round. Will be 0 if there
     ///      was no builder.
     function lastWinningBid() external view returns (uint256);
+    /// @notice Player index of the last builder.
+    /// @dev    `INVALID_PLAYER_IDX` if no builder (emtpy block).
+    function lastBuilder() external view returns (uint8);
     /// @notice Balance of a player's asset (goods or gold).
     function balanceOf(uint8 playerIdx, uint8 assetIdx)
         external view returns (uint256 balance);

@@ -27,8 +27,21 @@ contract Match is Script {
         sc2 = new SafeCreate2();
     }
 
-    function runMatch(string[] memory botNames)
+    function runShuffledMatch(string[] memory botNames)
         external returns (Game game, PlayerResult[] memory playerResults)
+    {
+        uint256 r = uint256(keccak256(abi.encodePacked(vm.unixTime())));
+        uint256 n = botNames.length;
+        for (uint256 i; i < n; ++i) {
+            uint256 j = (r % (n - i)) + i;
+            (botNames[i], botNames[j]) = (botNames[j], botNames[i]);
+            r = uint256(keccak256(abi.encodePacked(r)));
+        }
+        return runMatch(botNames);
+    }
+
+    function runMatch(string[] memory botNames)
+        public returns (Game game, PlayerResult[] memory playerResults)
     {
         require(botNames.length >= MIN_PLAYERS && botNames.length <= MAX_PLAYERS, '# of players');
         PlayerInfo[] memory players = new PlayerInfo[](botNames.length);
@@ -44,38 +57,17 @@ contract Match is Script {
             players[i].name = botNames[i];
             players[i].creationCode = vm.parseJsonBytes(json, '.bytecode.object');
         }
-        (game, playerResults) = runMatch(players);
-        {
-            console2.log(string.concat(
-                unicode'🏁 Game ended after ',
-                vm.toString(game.round()),
-                ' rounds:'
-            ));
-            for (uint256 i; i < playerResults.length; ++i) {
-                string memory bullet = unicode'🥉';
-                if (i == 0) {
-                    bullet = unicode'🏆️';
-                } else if (i == 1) {
-                    bullet = unicode'🥈';
-                }
-                console2.log(string.concat(
-                    '\t',
-                    bullet,
-                    ' \x1b[1m',
-                    players[playerResults[i].playerIdx].name,
-                    '\x1b[0m [',
-                    vm.toString(playerResults[i].playerIdx),
-                    ']: ',
-                    _toDecimals(playerResults[i].score),
-                    ' ',
-                    _toAssetEmoji(playerResults[i].scoreAssetIdx)
-                ));
-            }
-        }
+        (game, playerResults) = _runMatch(players);
+        console2.log(string.concat(
+            unicode'🏁 Game ended after ',
+            vm.toString(game.round()),
+            ' rounds:'
+        ));
+        _printFinalScores(players, playerResults);
     }
 
-    function runMatch(PlayerInfo[] memory players)
-        public returns (Game game, PlayerResult[] memory playerResults)
+    function _runMatch(PlayerInfo[] memory players)
+        private returns (Game game, PlayerResult[] memory playerResults)
     {
         IPlayer[] memory playerInstances;
         {
@@ -101,11 +93,14 @@ contract Match is Script {
             }
         }
         uint8 winnerIdx = INVALID_PLAYER_IDX;
-        while (winnerIdx == INVALID_PLAYER_IDX) {
+        while (!game.isGameOver()) {
             winnerIdx = game.playRound();
+            _printRoundState(game, players);
         }
-        uint256[] memory scores = game.scorePlayers();
+
+        playerResults = new PlayerResult[](players.length);
         uint8[] memory scoreAssetIdxs = new uint8[](players.length);
+        uint256[] memory scores = game.scorePlayers();
         for (uint8 i; i < playerInstances.length; ++i) {
             for (uint8 j = 1; j < players.length; ++j) {
                 if (game.balanceOf(i, j) == scores[i]) {
@@ -115,18 +110,75 @@ contract Match is Script {
             }
         }
         uint8[] memory ranking = _rankPlayers(scores);
-        assert(winnerIdx == ranking[0]);
-        playerResults = new PlayerResult[](players.length);
+        assert(winnerIdx == INVALID_PLAYER_IDX || winnerIdx == ranking[0]);
         for (uint256 i; i < players.length; ++i) {
-            playerResults[i] = PlayerResult({
-                playerIdx: ranking[i],
-                player: playerInstances[ranking[i]],
-                score: scores[ranking[i]],
-                scoreAssetIdx: scoreAssetIdxs[ranking[i]]
-            });
+            playerResults[i].playerIdx = ranking[i];
+            playerResults[i].player = playerInstances[ranking[i]];
+            playerResults[i].score = scores[ranking[i]];
+            playerResults[i].scoreAssetIdx = scoreAssetIdxs[ranking[i]];
         }
     }
-   
+
+    function _printRoundState(Game game, PlayerInfo[] memory players) private {
+        console2.log(string.concat('Round ', vm.toString(game.round()), ':'));
+        uint8[] memory ranking = _rankPlayers(game.scorePlayers());
+        uint8 assetCount = game.assetCount();
+        uint8 lastBuidlerIdx = game.lastBuilder();
+        for (uint8 i; i < ranking.length; ++i) {
+            console2.log(string.concat(
+                '\t',
+                lastBuidlerIdx == ranking[i] ? '(B) ' : '   ',
+                '\x1b[1m',
+                players[ranking[i]].name,
+                '\x1b[0m [',
+                vm.toString(ranking[i]),
+                ']:'
+            ));
+            string memory bals = '\t\t';
+            for (uint8 asset; asset < assetCount; ++asset) {
+                bals = string.concat(
+                    bals,
+                    asset == 0 ? '' : ', ',
+                    _toDecimals(game.balanceOf(ranking[i], asset)),
+                    ' ',
+                    _toAssetEmoji(asset)
+                );
+            }
+            console2.log(bals);
+        }
+    }
+
+    function _printFinalScores(
+        PlayerInfo[] memory players,
+        PlayerResult[] memory playerResults
+    )
+        private
+    {
+        for (uint256 i; i < playerResults.length; ++i) {
+            string memory bullet = unicode'🥉';
+            if (i == 0) {
+                bullet = unicode'🏆️';
+            } else if (i == 1) {
+                bullet = unicode'🥈';
+            }
+            console2.log(string.concat(
+                '\t',
+                bullet,
+                ' \x1b[1m',
+                players[playerResults[i].playerIdx].name,
+                '\x1b[0m [',
+                vm.toString(playerResults[i].playerIdx),
+                ']: ',
+                _toDecimals(playerResults[i].score),
+                ' ',
+                _toAssetEmoji(playerResults[i].scoreAssetIdx),
+                ' (',
+                vm.toString(playerResults[i].scoreAssetIdx),
+                ')'
+            ));
+        }
+    }
+
     function _rankPlayers(uint256[] memory scores)
         private pure returns (uint8[] memory idxs)
     {
@@ -150,7 +202,7 @@ contract Match is Script {
         private pure returns (string memory dec)
     {
         uint256 whole = weis / 1e18;
-        uint256 frac = weis - (whole * 1e18);
+        uint256 frac = (weis - (whole * 1e18)) / 1e14;
         return string.concat(vm.toString(whole), '.', vm.toString(frac));
     }
 
@@ -158,12 +210,12 @@ contract Match is Script {
         private pure returns (string memory emoji)
     {
         if (assetIdx > 6) return string.concat('$', vm.toString(assetIdx));
-        if (assetIdx == 6) return unicode'🍌 (6)';
-        if (assetIdx == 5) return unicode'🍒 (5)';
-        if (assetIdx == 4) return unicode'🥑 (4)';
-        if (assetIdx == 3) return unicode'🐟️ (3)';
-        if (assetIdx == 2) return unicode'🥖 (2)';
-        if (assetIdx == 1) return unicode'🍅 (1)';
+        if (assetIdx == 6) return unicode'🍌';
+        if (assetIdx == 5) return unicode'🍒';
+        if (assetIdx == 4) return unicode'🥑';
+        if (assetIdx == 3) return unicode'🐟️';
+        if (assetIdx == 2) return unicode'🥖';
+        if (assetIdx == 1) return unicode'🍅';
         return unicode'🪙';
     }
 }
