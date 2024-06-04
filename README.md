@@ -58,7 +58,7 @@ The project comes with some [example player contracts](./script/players/). None 
 ### Local Matches
 The project comes with a foundry [script](./script/Match.sol) for running matches locally so you can see how well your bot performs against others. Matches can be held against 2 or more player contracts. Note that actual, production tournaments are always conducted with 4 players.
 
-For example, you can run a match against the included example players [`GreedyBuyer`](./script/players/GreedyBuyer.sol) and [`CheapBuyer`](./scripts/players/CheapBuyer.sol) with the following command:
+For example, you can run a match against the included example players [`GreedyBuyer`](./script/players/GreedyBuyer.sol) and [`CheapBuyer`](./script/players/CheapBuyer.sol) with the following command:
 
 ```bash
 forge script Match --sig 'runMatch(string[])' '["GreedyBuyer.sol", "CheapBuyer.sol"]'
