@@ -229,7 +229,7 @@ contract Game is IGame, AssetMarket {
         t_inRound.store(true);
         uint16 round_ = _round;
         require(round_ < MAX_ROUNDS, GameOverError());
-        _distributeIncome();
+        _resupply();
         _buildBlock();
         emit RoundPlayed(round_);
         {
@@ -533,7 +533,7 @@ contract Game is IGame, AssetMarket {
     }
 
     /// @dev Grant each player an equal amount of assets.
-    function _distributeIncome() internal virtual {
+    function _resupply() internal virtual {
         uint8 numAssets = ASSET_COUNT;
         for (uint8 playerIdx; playerIdx < playerCount; ++playerIdx) {
             for (uint8 assetIdx; assetIdx < numAssets; ++assetIdx) {

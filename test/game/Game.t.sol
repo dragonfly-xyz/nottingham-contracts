@@ -178,7 +178,7 @@ contract GameTest is Test {
         assertTrue(game.isGameOver());
     }
 
-    function test_distributeIncome_givesAssetsToEveryPlayer() external {
+    function test_resupply_givesAssetsToEveryPlayer() external {
         (TestGame game,) = _createGame(T.toDynArray([
             type(NoopPlayer).creationCode,
             type(NoopPlayer).creationCode,
@@ -191,7 +191,7 @@ contract GameTest is Test {
                 assertEq(game.balanceOf(playerIdx, assetIdx), 0);
             }
         }
-        game.__distributeIncome();
+        game.__resupply();
         for (uint8 playerIdx; playerIdx < playerCount; ++playerIdx) {
             for (uint8 assetIdx; assetIdx < assetCount; ++assetIdx) {
                 assertEq(
@@ -1028,8 +1028,8 @@ contract TestGame is Game {
         t_currentBuilder.store(address(builder));
     }
 
-    function __distributeIncome() external virtual {
-        _distributeIncome();
+    function __resupply() external virtual {
+        _resupply();
     }
 
     function __buildPlayerBlock(uint8 builderIdx) external returns (uint256 bid) {
