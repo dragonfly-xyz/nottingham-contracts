@@ -23,8 +23,8 @@ contract BytecodePlayer is IPlayer {
                 0x0,
                 0
             )
-            if iszero(s) { revert(0, 0) }
             returndatacopy(0x00, 0x00, returndatasize())
+            if iszero(s) { revert(0x00, returndatasize()) }
             return(0x00, returndatasize())
         }
     }
