@@ -33,7 +33,7 @@ For every round the following happens:
 2. All players participate in a blind auction for the privilege of building the block for the round.
 3. If a player wins the block auction, that player builds the block, settling all bundles and getting their bid burned.
 4. If no player wins the block auction, no bundles are settled.
-5. If we've played the maximum number of rounds (32) or a player is found to have `32` units (`32e18`) of *any* goods token, the game ends.
+5. If we've played the maximum number of rounds (`32`) or a player is found to have `32` units (`32e18`) of *any* goods token, the game ends.
 
 When the game ends, players are sorted by their maximum balance of any goods token. This is the final ranking for the match.
 
