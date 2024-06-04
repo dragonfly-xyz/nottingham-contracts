@@ -4,12 +4,18 @@ pragma solidity ^0.8;
 import '~/game/IGame.sol';
 
 // Base class for example players.
-// Creates empty bundles and settles all players in order.
+// Creates empty bundles and settles all players in order and
+// bids all our gold.
 contract BasePlayer is IPlayer {
+    // The game instance.
     IGame internal immutable GAME;
+    // Our player index.
     uint8 internal immutable PLAYER_IDX;
+    // How many players are in the game.
     uint8 internal immutable PLAYER_COUNT;
+    // How many assets (including gold) are in the game.
     uint8 internal immutable ASSET_COUNT;
+    // How many goods (assets that aren't gold) are in the game.
     uint8 internal immutable GOODS_COUNT;
     
     constructor(IGame game, uint8 playerIdx, uint8 playerCount, uint8 assetCount) {
@@ -31,8 +37,8 @@ contract BasePlayer is IPlayer {
         for (uint8 playerIdx; playerIdx < bundles.length; ++playerIdx) {
             GAME.settleBundle(playerIdx, bundles[playerIdx]);
         }
-        // Bid the minimum.
-        return 1;
+        // Bid all our gold.
+        return GAME.balanceOf(PLAYER_IDX, GOLD_IDX);
     }
 
     // Find the good (non-gold asset) we have the highest balance of.

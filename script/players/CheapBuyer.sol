@@ -12,15 +12,22 @@ contract CheapBuyer is BasePlayer {
     function createBundle(uint8 /* builderIdx */)
         external virtual override returns (PlayerBundle memory bundle)
     {
-        bundle.swaps = new SwapSell[](ASSET_COUNT);
         uint8 wantAssetIdx = _getMaxBuyableGood();
-        for (uint8 i; i < GOODS_COUNT; ++i) {
-            uint8 assetIdx = FIRST_GOOD_IDX + i;
-            if (assetIdx != wantAssetIdx) {
-                bundle.swaps[i] = SwapSell({
+        bundle.swaps = new SwapSell[](ASSET_COUNT);
+        // Convert 99% of every other asset to the target asset and
+        // the remaining 1% to gold for our block bid.
+        for (uint8 assetIdx; assetIdx < ASSET_COUNT; ++assetIdx) {
+            if (assetIdx != wantAssetIdx && assetIdx != GOLD_IDX) {
+                uint256 bal = GAME.balanceOf(PLAYER_IDX, assetIdx);
+                bundle.swaps[assetIdx] = SwapSell({
                     fromAssetIdx: assetIdx,
                     toAssetIdx: wantAssetIdx,
-                    fromAmount: GAME.balanceOf(PLAYER_IDX, assetIdx)
+                    fromAmount: bal * 99 / 100
+                });
+                bundle.swaps[assetIdx] = SwapSell({
+                    fromAssetIdx: assetIdx,
+                    toAssetIdx: GOLD_IDX,
+                    fromAmount: bal * 1 / 100
                 });
             }
         }

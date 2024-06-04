@@ -16,7 +16,7 @@ contract CheapFrontRunner is CheapBuyer {
         // Buy whatever asset we can get the most of.
         uint8 wantAssetIdx = _getMaxBuyableGood();
 
-        // Sell 5% of all the other goods for a gold as our block bid and the
+        // Sell 5% of all the other goods for gold and the
         // remaining for the asset we want.
         uint256 goldBought;
         for (uint8 i; i < GOODS_COUNT; ++i) {

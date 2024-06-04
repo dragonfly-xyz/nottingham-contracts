@@ -16,7 +16,7 @@ contract GreedyFrontRunner is GreedyBuyer {
         // Buy whatever asset we have the most of.
         uint8 wantAssetIdx = _getMaxGood();
 
-        // Sell 5% of all the other goods for a gold as our block bid and the
+        // Sell 5% of all the other goods for gold and the
         // remaining for the asset we want.
         uint256 goldBought;
         for (uint8 i; i < GOODS_COUNT; ++i) {
