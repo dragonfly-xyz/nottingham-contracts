@@ -56,7 +56,7 @@ The [`IGame`](./src/game/IGame.sol) interface exposes all functions on the `Game
 The project comes with some [example player contracts](./script/players/). None are particularly sophisticated but will demonstrate typical player behaviors. You can choose to create new contracts in the `players` folder and extend the examples to get started quickly.
 
 ### Local Matches
-The project comes with a foundry [script](./script/Match.sol) for running matches locally so you can see how well your bot performs against others. Matches can be held against 2 or more player contracts. Note that actual, production tournaments are always conducted with 4 players.
+The project comes with a foundry [script](./script/Match.sol) for running matches locally so you can see how well your bot performs against others. Matches can be held against 2 or more player contracts. Note that production tournaments are always conducted with 4 players.
 
 For example, you can run a match against the included example players [`GreedyBuyer`](./script/players/GreedyBuyer.sol) and [`CheapBuyer`](./script/players/CheapBuyer.sol) with the following command:
 
@@ -64,7 +64,7 @@ For example, you can run a match against the included example players [`GreedyBu
 forge script Match --sig 'runMatch(string[])' '["GreedyBuyer.sol", "CheapBuyer.sol"]'
 ```
 
-`runMatch()` assigns players the same player indexes, which is analagous to turn order, in the same order that player contract names are passed in. The performance of some of the example players can be biased by their order in a match. You can instead use `runShuffledMatch()` to assign players a random index each run:
+`runMatch()` assigns players the same player indexes in the same order that player names are passed in. The performance of some of the example players can be biased by their order in a match. You can instead use `runShuffledMatch()` to assign players a random index each run:
 
 ```bash
 forge script Match --sig 'runShuffledMatch(string[])' '["GreedyBuyer.sol", "CheapBuyer.sol"]'
