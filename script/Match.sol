@@ -7,6 +7,7 @@ import { GameDeployer } from '~/game/GameDeployer.sol';
 import { LibMatchUtils } from '~/game/LibMatchUtils.sol';
 import { Script } from 'forge-std/Script.sol';
 import { console2 } from 'forge-std/console2.sol';
+import { Vm } from 'forge-std/Vm.sol';
 
 contract Match is Script {
     SafeCreate2 sc2;
@@ -92,10 +93,27 @@ contract Match is Script {
                 ));
             }
         }
+
+        uint256[][] memory prevBalances = new uint256[][](players.length);
+        uint8 assetCount = game.assetCount();
+        for (uint8 playerIdx; playerIdx < prevBalances.length; ++playerIdx) {
+            prevBalances[playerIdx] = new uint256[](assetCount);
+        }
         uint8 winnerIdx = INVALID_PLAYER_IDX;
         while (!game.isGameOver()) {
+            vm.recordLogs();
             winnerIdx = game.playRound();
-            _printRoundState(game, players);
+            uint256[] memory bids = _extractAuctionResults(
+                vm.getRecordedLogs(),
+                uint8(players.length)
+            );
+            _printRoundState(game, players, bids, prevBalances);
+            for (uint8 playerIdx; playerIdx < prevBalances.length; ++playerIdx) {
+                for (uint8 assetIdx; assetIdx < assetCount; ++assetIdx) {
+                    prevBalances[playerIdx][assetIdx] =
+                        game.balanceOf(playerIdx, assetIdx);
+                }
+            }
         }
 
         playerResults = new PlayerResult[](players.length);
@@ -119,32 +137,64 @@ contract Match is Script {
         }
     }
 
-    function _printRoundState(Game game, PlayerInfo[] memory players) private {
+    function _extractAuctionResults(Vm.Log[] memory logs, uint8 playerCount)
+        private returns (uint256[] memory bids)
+    {
+        bids = new uint256[](playerCount);
+        for (uint256 i; i < logs.length; ++i) {
+            Vm.Log memory log = logs[i];
+            if (log.topics.length == 1) {
+                bytes32 sig = log.topics[0];
+                if (sig == Game.BlockBid.selector) {
+                    (uint8 playerIdx, uint256 bid) =
+                        abi.decode(log.data, (uint8, uint256));
+                    bids[playerIdx] = bid;
+                }
+            }
+        }
+    }
+
+    function _printRoundState(
+        Game game,
+        PlayerInfo[] memory players,
+        uint256[] memory bids,
+        uint256[][] memory prevBalances
+    ) private {
         console2.log(string.concat('Round ', vm.toString(game.round()), ':'));
         uint8[] memory ranking = _rankPlayers(game.scorePlayers());
         uint8 assetCount = game.assetCount();
         uint8 lastBuidlerIdx = game.lastBuilder();
         for (uint8 i; i < ranking.length; ++i) {
+            uint8 playerIdx = ranking[i];
             console2.log(string.concat(
                 '\t',
                 lastBuidlerIdx == ranking[i] ? '(B) ' : '   ',
                 '\x1b[1m',
-                players[ranking[i]].name,
+                players[playerIdx].name,
                 '\x1b[0m [',
-                vm.toString(ranking[i]),
-                ']:'
+                vm.toString(playerIdx),
+                ']',
+                bids[playerIdx] == 0
+                    ? ''
+                    : string.concat(' (bid ', _toDecimals(bids[playerIdx]), ' ', _toAssetEmoji(0), ')'),
+                ':'
             ));
-            string memory bals = '\t\t';
             for (uint8 asset; asset < assetCount; ++asset) {
-                bals = string.concat(
-                    bals,
-                    asset == 0 ? '' : ', ',
-                    _toDecimals(game.balanceOf(ranking[i], asset)),
-                    ' ',
-                    _toAssetEmoji(asset)
+                uint256 bal = game.balanceOf(playerIdx, asset);
+                int128 delta = int128(uint128(bal)) -
+                    int128(uint128(prevBalances[playerIdx][asset]));
+                console2.log(
+                    string.concat(
+                        '\t\t',
+                        _toAssetEmoji(asset),
+                        ' ',
+                        _toDecimals(bal),
+                        delta != 0
+                            ? string.concat(' (', _toDeltaDecimals(delta), ')')
+                            : ''
+                    )
                 );
             }
-            console2.log(bals);
         }
     }
 
@@ -204,6 +254,16 @@ contract Match is Script {
         uint256 whole = weis / 1e18;
         uint256 frac = (weis - (whole * 1e18)) / 1e14;
         return string.concat(vm.toString(whole), '.', vm.toString(frac));
+    }
+
+
+    function _toDeltaDecimals(int128 delta)
+        private pure returns (string memory dec)
+    {
+        if (delta < 0) {
+            return string.concat('\x1b[31m-', _toDecimals(uint256(uint128(-delta))), '\x1b[0m');
+        }
+        return string.concat('\x1b[32m+', _toDecimals(uint256(uint128(delta))), '\x1b[0m');
     }
 
     function _toAssetEmoji(uint8 assetIdx)

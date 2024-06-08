@@ -18,7 +18,7 @@ uint8 constant MAX_ROUNDS = 32;
 uint256 constant MIN_WINNING_ASSET_BALANCE = 32e18;
 // How much gold the market starts with at the beginning of the game,
 // to be multiplied with the number of players.
-uint256 constant MARKET_STARTING_GOLD_PER_PLAYER = 1e18;
+uint256 constant MARKET_STARTING_GOLD_PER_PLAYER = 0.5e18;
 // How much of every good the market starts with at the beginning of the game,
 // to be multiplied with the number of players.
 uint256 constant MARKET_STARTING_GOODS_PER_PLAYER = 4e18;

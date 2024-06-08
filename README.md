@@ -25,11 +25,13 @@ Each match happens in a fresh instance of the `Game` contract.
 1. The `Game` contract will deploy each of the player bytecodes passed in and assign them player indexes in the same order. Players are identified by these (0-based) indices, not their address. Players will not know the address of other players in production.
 2. An N-dimensional constant-product [AMM](./src/game/Markets.sol) will be initialized with `N` assets/tokens, where `N` is equal to the number of players in the game. Assets are 18-decimal tokens identified by their (0-based) asset index. Asset `0` is equivalent to the "gold" asset and `1+` are designanted as "goods." This means that there is always one less good than there are players.
 
+> ℹ️ During live tournaments, matches always consist of **4** players.
+
 ### Game Rounds
 
 For every round the following happens:
 
-1. Each player is resupplied, being minted `0.5` units (`0.5e18`) of every goods token and only `1` wei of gold.
+1. Each player is resupplied, being minted `0.5` units (`0.5e18`) of every goods token and *only* `1` wei of gold.
 2. All players participate in a blind auction for the privilege of building the block for the round.
 3. If a player wins the block auction, that player builds the block, settling all bundles and getting their bid burned.
 4. If no player wins the block auction, no bundles are settled.
@@ -45,7 +47,7 @@ Players are smart contracts that expose [two callback functions](./src/game/IPla
     * Returns a `PlayerBundle` for the round, which consists of a sequence of swaps that must be executed by the block builder identified by `builderIdx`.
 * `buildBlock(PlayerBundle[] bundles) -> uint256 bid`
     * Receives all bundles created by every player, ordered by player index.
-    * Must settle (via `Game.settleBundle()`) all but their own bundles, but in any order.
+    * Must settle (via `Game.settleBundle()`) *ALL but their own* bundles, but in any order.
     * Can directly call swap functions on the `Game` instance (`sell()` or `buy()`).
     * Returns the player's bid (in gold) to build this block. This gold will be burned if they win the block auction.
 
@@ -78,25 +80,34 @@ If successful, the output of either command will:
 The square brackets (`[x]`) after each player name indicates their assigned player index. The emoji and parenthesis after assets indicate their asset index. Players are always sorted by their highest max good balance.
 
 ```bash
-  Round 1:
-  	   CheapBuyer [1]:
-  		0.0 🪙, 0.0 🍅, 0.9295 🥖
-  	(B) CheapFrontRunner [0]:
-  		0.0 🪙, 0.237 🍅, 0.9285 🥖
-  	   GreedyBuyer [2]:
-  		0.0 🪙, 0.0 🍅, 0.8885 🥖
 # ...
-  Round 32:
-  	(B) CheapFrontRunner [0]:
-  		0.0 🪙, 30.6200 🍅, 0.7229 🥖
-  	   GreedyBuyer [2]:
-  		0.0 🪙, 0.0 🍅, 29.4251 🥖
-  	   CheapBuyer [1]:
-  		0.0 🪙, 1.9145 🍅, 0.0 🥖
-  🏁 Game ended after 32 rounds:
-  	🏆️ CheapFrontRunner [0]: 30.6200 🍅 (1)
-  	🥈 GreedyBuyer [2]: 29.4251 🥖 (2)
-  	🥉 CheapBuyer [1]: 1.9145 🍅 (1)
+  Round 16:
+  	   BytecodePlayer [1] (bid 0.146 🪙):
+  		🪙 0.0
+  		🍅 0.0
+  		🥖 0.0
+  		🐟️ 23.3951 (+1.5278)
+  	   SimpleBuyer [0] (bid 0.0 🪙):
+  		🪙 0.0 (+0.0)
+  		🍅 20.303 (+0.9373)
+  		🥖 0.0
+  		🐟️ 0.0
+  	(B) CheapFrontRunner [3] (bid 0.533 🪙):
+  		🪙 0.233 (+0.0)
+  		🍅 9.7577 (+9.2912)
+  		🥖 0.8854 (-17.2562)
+  		🐟️ 0.249 (-0.0)
+  	   GreedyBuyer [2] (bid 0.460 🪙):
+  		🪙 0.473 (+0.100)
+  		🍅 7.3528 (+0.4257)
+  		🥖 7.3528 (+0.4257)
+  		🐟️ 8.0 (+0.5000)
+# ...
+  🏁 Game ended after 23 rounds:
+  	🏆️ BytecodePlayer [1]: 33.1317 🐟️ (3)
+  	🥈 SimpleBuyer [0]: 28.5219 🍅 (1)
+  	🥉 CheapFrontRunner [3]: 26.2189 🥖 (2)
+  	🥉 GreedyBuyer [2]: 11.5000 🐟️ (3)
 
 ```
 
