@@ -25,17 +25,17 @@ Each match happens in a fresh instance of the `Game` contract.
 1. The `Game` contract will deploy each of the player bytecodes passed in and assign them player indexes in the same order. Players are identified by these (0-based) indices, not their address. Players will not know the address of other players in production.
 2. An N-dimensional constant-product [AMM](./src/game/Markets.sol) will be initialized with `N` assets/tokens, where `N` is equal to the number of players in the game. Assets are 18-decimal tokens identified by their (0-based) asset index. Asset `0` is equivalent to the "gold" asset and `1+` are designanted as "goods." This means that there is always one less good than there are players.
 
-> ℹ️ During live tournaments, matches always consist of **4** players.
+> ℹ️ Contest tournaments matches always consist of **4** players.
 
 ### Game Rounds
 
 For every round the following happens:
 
-1. Each player is resupplied, being minted `0.5` units (`0.5e18`) of every goods token and *only* `1` wei of gold.
+1. Each player is resupplied, being minted `1` units (`1e18`) of every goods token and only `1` *wei* of gold.
 2. All players participate in a blind auction for the privilege of building the block for the round.
 3. If a player wins the block auction, that player builds the block, settling all bundles and getting their bid burned.
 4. If no player wins the block auction, no bundles are settled.
-5. If we've played the maximum number of rounds (`32`) or a player is found to have `32` units (`32e18`) of *any* goods token, the game ends.
+5. If we've played the maximum number of rounds (`32`) or a player is found to have `64` units (`64e18`) of *any* goods token, the game ends.
 
 When the game ends, players are sorted by their maximum balance of any goods token. This is the final ranking for the match.
 
@@ -73,42 +73,42 @@ forge script Match --sig 'runShuffledMatch(string[])' '["GreedyBuyer.sol", "Chea
 ```
 
 If successful, the output of either command will:
-- After each round, print the asset balances of each player.
-    - The player that built the block will be prefixed with `(B)`.
+- After each round,:
+	- Print each player's bid.
+    - Prefix the player that built the block with `(B)`.
+	- Print asset balances of each player and the change from last round.
 - At the end of game, print the final score (max non-gold balance) for each player.
 
-The square brackets (`[x]`) after each player name indicates their assigned player index. The emoji and parenthesis after assets indicate their asset index. Players are always sorted by their highest max good balance.
+Players are always sorted by their highest max good balance (potential final score).
 
 ```bash
 # ...
-  Round 16:
-  	   BytecodePlayer [1] (bid 0.146 🪙):
+  Round 23:
+  	   BytecodePlayer [0] (bid 0.225 🪙):
   		🪙 0.0
   		🍅 0.0
   		🥖 0.0
-  		🐟️ 23.3951 (+1.5278)
-  	   SimpleBuyer [0] (bid 0.0 🪙):
+  		🐟️ 65.3576 (+2.4824)
+  	   SimpleBuyer [1] (bid 0.0 🪙):
   		🪙 0.0 (+0.0)
-  		🍅 20.303 (+0.9373)
-  		🥖 0.0
+  		🍅 0.0
+  		🥖 57.9304 (+3.1976)
   		🐟️ 0.0
-  	(B) CheapFrontRunner [3] (bid 0.533 🪙):
-  		🪙 0.233 (+0.0)
-  		🍅 9.7577 (+9.2912)
-  		🥖 0.8854 (-17.2562)
-  		🐟️ 0.249 (-0.0)
-  	   GreedyBuyer [2] (bid 0.460 🪙):
-  		🪙 0.473 (+0.100)
-  		🍅 7.3528 (+0.4257)
-  		🥖 7.3528 (+0.4257)
-  		🐟️ 8.0 (+0.5000)
-# ...
+  	(B) CheapFrontRunner [3] (bid 0.898 🪙):
+  		🪙 0.865 (+0.0)
+  		🍅 52.5445 (+49.3045)
+  		🥖 1.1263 (-21.5854)
+  		🐟️ 0.968 (-0.9425)
+  	   GreedyBuyer [2] (bid 0.189 🪙):
+  		🪙 0.141 (+0.141)
+  		🍅 20.4321 (+0.7936)
+  		🥖 20.4321 (+0.7936)
+  		🐟️ 23.0 (+1.0)
   🏁 Game ended after 23 rounds:
-  	🏆️ BytecodePlayer [1]: 33.1317 🐟️ (3)
-  	🥈 SimpleBuyer [0]: 28.5219 🍅 (1)
-  	🥉 CheapFrontRunner [3]: 26.2189 🥖 (2)
-  	🥉 GreedyBuyer [2]: 11.5000 🐟️ (3)
-
+  	🏆️ BytecodePlayer [0]: 65.3576 🐟️ (3)
+  	🥈 SimpleBuyer [1]: 57.9304 🥖 (2)
+  	🥉 CheapFrontRunner [3]: 52.5445 🍅 (1)
+  	🥉 GreedyBuyer [2]: 23.0 🐟️ (3)
 ```
 
 If you want to see more detail of what went on during a match, you can run the script with full traces on by passing in the `-vvvv` flag. Be warned, this will be a lot of output and can be difficult to read because of how the game logic calls player callbacks repeatedly to simulate them.
