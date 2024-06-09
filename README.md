@@ -25,7 +25,7 @@ Each match happens in a fresh instance of the `Game` contract.
 1. The `Game` contract will deploy each of the player bytecodes passed in and assign them player indexes in the same order. Players are identified by these (0-based) indices, not their address. Players will not know the address of other players in production.
 2. An N-dimensional constant-product [AMM](./src/game/Markets.sol) will be initialized with `N` assets/tokens, where `N` is equal to the number of players in the game. Assets are 18-decimal tokens identified by their (0-based) asset index. Asset `0` is equivalent to the "gold" asset and `1+` are designanted as "goods." This means that there is always one less good than there are players.
 
-> ℹ️ Contest tournaments matches always consist of **4** players.
+> ℹ️ Contest tournament matches always consist of **4** players.
 
 ### Game Rounds
 
@@ -47,7 +47,7 @@ Players are smart contracts that expose [two callback functions](./src/game/IPla
     * Returns a `PlayerBundle` for the round, which consists of a sequence of swaps that must be executed by the block builder identified by `builderIdx`.
 * `buildBlock(PlayerBundle[] bundles) -> uint256 bid`
     * Receives all bundles created by every player, ordered by player index.
-    * Must settle (via `Game.settleBundle()`) *ALL but their own* bundles, but in any order.
+    * Must settle (via `Game.settleBundle()`) *ALL but their own* bundles, in *any* order.
     * Can directly call swap functions on the `Game` instance (`sell()` or `buy()`).
     * Returns the player's bid (in gold) to build this block. This gold will be burned if they win the block auction.
 
