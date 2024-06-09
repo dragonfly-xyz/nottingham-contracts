@@ -73,42 +73,56 @@ forge script Match --sig 'runShuffledMatch(string[])' '["GreedyBuyer.sol", "Chea
 ```
 
 If successful, the output of either command will:
-- After each round,:
-	- Print each player's bid.
+- For each round:
+	- Print each player's bid, ending balances, and change from last round.
     - Prefix the player that built the block with `(B)`.
-	- Print asset balances of each player and the change from last round.
+	- Print the swaps that occured in that round, in order.
 - At the end of game, print the final score (max non-gold balance) for each player.
-
-Players are always sorted by their highest max good balance (potential final score).
 
 ```bash
 # ...
-  Round 23:
-  	   BytecodePlayer [0] (bid 0.225 🪙):
-  		🪙 0.0
-  		🍅 0.0
-  		🥖 0.0
-  		🐟️ 65.3576 (+2.4824)
-  	   SimpleBuyer [1] (bid 0.0 🪙):
-  		🪙 0.0 (+0.0)
-  		🍅 0.0
-  		🥖 57.9304 (+3.1976)
-  		🐟️ 0.0
-  	(B) CheapFrontRunner [3] (bid 0.898 🪙):
-  		🪙 0.865 (+0.0)
-  		🍅 52.5445 (+49.3045)
-  		🥖 1.1263 (-21.5854)
-  		🐟️ 0.968 (-0.9425)
-  	   GreedyBuyer [2] (bid 0.189 🪙):
-  		🪙 0.141 (+0.141)
-  		🍅 20.4321 (+0.7936)
-  		🥖 20.4321 (+0.7936)
-  		🐟️ 23.0 (+1.0)
-  🏁 Game ended after 23 rounds:
-  	🏆️ BytecodePlayer [0]: 65.3576 🐟️ (3)
-  	🥈 SimpleBuyer [1]: 57.9304 🥖 (2)
-  	🥉 CheapFrontRunner [3]: 52.5445 🍅 (1)
-  	🥉 GreedyBuyer [2]: 23.0 🐟️ (3)
+  Round 26:
+  	   SimpleBuyer [0] (bid 🪙 0.0):
+			🪙 0.0 (+0.0)
+			🍅 64.7681 (+3.6227)
+  	   TheCuban [3] (bid 🪙 0.462):
+			🪙 0.840 (+0.7)
+			🍅 1.9701 (+0.9801)
+			🥖 1.9701 (+0.9801)
+			🐟️ 62.1590 (+1.0)
+  	   GreedyBuyer [1] (bid 🪙 0.119):
+			🪙 0.83 (+0.83)
+			🍅 22.7657 (+0.7700)
+			🥖 22.7657 (+0.7700)
+			🐟️ 26.0 (+1.0)
+  	(B) CheapFrontRunner [2] (bid 🪙 0.685):
+			🪙 0.1394 (+0.0)
+			🍅 0.1994 (-3.0)
+			🥖 2.6864 (-52.8701)
+			🐟️ 25.6553 (+23.6235)
+  
+	======ROUND ACTIVITY======
+
+  	(B) CheapFrontRunner sold:
+			🍅 0.2099 -> 🪙 0.58
+			🍅 3.7900 -> 🐟️ 3.4115
+			🥖 2.8278 -> 🪙 0.626
+			🥖 51.423 -> 🐟️ 19.2119
+  	    SimpleBuyer sold:
+			🥖 1.0 -> 🍅 0.4492
+			🐟️ 1.0 -> 🍅 2.1734
+  	    GreedyBuyer sold:
+			🍅 0.2299 -> 🪙 0.58
+			🥖 0.2299 -> 🪙 0.24
+  	    TheCuban sold:
+			🍅 0.199 -> 🪙 0.5
+			🥖 0.199 -> 🪙 0.2
+  
+🏁 Game ended after 26 rounds:
+  	🏆️ SimpleBuyer [0]: 🍅 64.7681 (1)
+  	🥈 TheCuban [3]: 🐟️ 62.1590 (3)
+  	🥉 GreedyBuyer [1]: 🐟️ 26.0 (3)
+  	🥉 CheapFrontRunner [2]: 🐟️ 25.6553 (3)
 ```
 
 If you want to see more detail of what went on during a match, you can run the script with full traces on by passing in the `-vvvv` flag. Be warned, this will be a lot of output and can be difficult to read because of how the game logic calls player callbacks repeatedly to simulate them.
