@@ -1,3 +1,5 @@
+> 🚨 This repo will be updated regularly for bug fixes, if game balance is tweaked, and to add top players from seasons. Try to pull every now and then.
+
 # Searchers of Nottingham
 
 ![illustration](static/illustration.png)
