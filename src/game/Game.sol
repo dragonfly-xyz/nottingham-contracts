@@ -490,10 +490,6 @@ contract Game is IGame, AssetMarket {
         } else {
             bundle = abi.decode(resultData, (PlayerBundle));
             require(bundle.swaps.length <= ASSET_COUNT * (ASSET_COUNT-1), TooManySwapsError());
-            for (uint256 i; i < bundle.swaps.length; ++i) {
-                _assertValidAsset(bundle.swaps[i].fromAssetIdx);
-                _assertValidAsset(bundle.swaps[i].toAssetIdx);
-            }
         }
     }
 

@@ -16,7 +16,8 @@ import {
     GOODS_INCOME_AMOUNT,
     PLAYER_BUILD_BLOCK_GAS_BASE,
     PLAYER_BUILD_BLOCK_GAS_PER_PLAYER,
-    MIN_GAS_PER_BUNDLE_SWAP
+    MIN_GAS_PER_BUNDLE_SWAP,
+    MAX_RETURN_DATA_SIZE
 } from "~/game/Game.sol";
 import { AssetMarket } from "~/game/Markets.sol";
 import { IPlayer, PlayerBundle, SwapSell } from "~/game/IPlayer.sol";
@@ -919,6 +920,15 @@ contract GameTest is Test {
         ));
         vm.prank(address(players[builderIdx]));
         game.sell(GOLD_IDX, GOLD_IDX + 1, fromAmount);
+    }
+
+    function test_constants() external {
+        {
+            uint256 playerCount = 4;
+            PlayerBundle memory bundle;
+            bundle.swaps = new SwapSell[](playerCount * (playerCount - 1));
+            assertGe(MAX_RETURN_DATA_SIZE, abi.encode(bundle).length);
+        }
     }
 
     function _createGame(bytes[] memory playerCreationCodes)

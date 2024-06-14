@@ -26,8 +26,12 @@ library LibAddress {
                 add(resultData, 0x20),
                 maxReturnDataSize
             )
-            mstore(resultData, returndatasize())
-            mstore(0x40, add(add(resultData, 0x20), returndatasize()))
+            let resultSize := returndatasize()
+            if gt(resultSize, maxReturnDataSize) {
+                resultSize := maxReturnDataSize
+            }
+            mstore(resultData, resultSize)
+            mstore(0x40, add(add(resultData, 0x20), resultSize))
         }
     }
 
@@ -40,7 +44,14 @@ library LibAddress {
     )
         internal returns (bool success, bytes memory resultData)
     {
-        return safeCall(payable(target), 0, callData, checkTarget, callGas, maxReturnDataSize);
+        return safeCall(
+            payable(target),
+            0,
+            callData,
+            checkTarget,
+            callGas,
+            maxReturnDataSize
+        );
     }
 
     function safeStaticCall(
@@ -65,8 +76,12 @@ library LibAddress {
                 add(resultData, 0x20),
                 maxReturnDataSize
             )
-            mstore(resultData, returndatasize())
-            mstore(0x40, add(add(resultData, 0x20), returndatasize()))
+            let resultSize := returndatasize()
+            if gt(resultSize, maxReturnDataSize) {
+                resultSize := maxReturnDataSize
+            }
+            mstore(resultData, resultSize)
+            mstore(0x40, add(add(resultData, 0x20), resultSize))
         }
     }
 }
