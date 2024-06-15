@@ -114,19 +114,23 @@ contract Match is Script {
         while (!game.isGameOver()) {
             vm.recordLogs();
             winnerIdx = game.playRound();
+            RoundState memory rs;
+            rs.players = players;
             Vm.Log[] memory logs = vm.getRecordedLogs();
-            uint256[] memory bids = _extractAuctionResults(
+            rs.bids = _extractAuctionResults(
                 game,
                 logs,
                 uint8(players.length)
             );
-            uint8[] memory failFlags = _extractFailures(
+            rs.failFlags = _extractFailures(
                 game,
                 logs,
                 uint8(players.length)
             );
-            SwapResult[] memory swaps = _extractSwaps(game, logs);
-            _printRoundState(game, players, bids, prevBalances, swaps, failFlags);
+            rs.swaps = _extractSwaps(game, logs);
+            rs.supply = game.marketState();
+            rs.prevBalances = prevBalances;
+            _printRoundState(game, rs);
             for (uint8 playerIdx; playerIdx < prevBalances.length; ++playerIdx) {
                 for (uint8 assetIdx; assetIdx < assetCount; ++assetIdx) {
                     prevBalances[playerIdx][assetIdx] =
@@ -246,13 +250,18 @@ contract Match is Script {
         }
     }
 
+    struct RoundState {
+        PlayerInfo[] players;
+        uint256[] bids;
+        uint256[][] prevBalances;
+        SwapResult[] swaps;
+        uint256[] supply;
+        uint8[] failFlags;
+    }
+
     function _printRoundState(
         Game game,
-        PlayerInfo[] memory players,
-        uint256[] memory bids,
-        uint256[][] memory prevBalances,
-        SwapResult[] memory swaps,
-        uint8[] memory failFlags
+        RoundState memory rs 
     ) private {
         console2.log(string.concat('\x1b[1mRound ', vm.toString(game.round()), '\x1b[0m:'));
         uint8[] memory ranking = _rankPlayers(game.scorePlayers());
@@ -263,14 +272,20 @@ contract Match is Script {
             console2.log(string.concat(
                 '\t',
                 lastBuidlerIdx == ranking[i] ? '(B) ' : '   ',
-                failFlags[playerIdx] != 0 ? '\x1b[31m' : '\x1b[1m',
-                players[playerIdx].name,
+                rs.failFlags[playerIdx] != 0 ? '\x1b[31m' : '\x1b[1m',
+                rs.players[playerIdx].name,
                 '\x1b[0m [',
                 vm.toString(playerIdx),
                 ']',
-                bids[playerIdx] == 0
+                rs.bids[playerIdx] == 0
                     ? ''
-                    : string.concat(' (bid ', _toAssetEmoji(0), ' ', _toDecimals(bids[playerIdx]), ')'),
+                    : string.concat(
+                        ' (bid ',
+                        _toAssetEmoji(0),
+                        ' ',
+                        _toDecimals(rs.bids[playerIdx]),
+                        ')'
+                    ),
                 ':'
             ));
             for (uint8 asset; asset < assetCount; ++asset) {
@@ -279,7 +294,7 @@ contract Match is Script {
                     continue;
                 }
                 int128 delta = int128(uint128(bal)) -
-                    int128(uint128(prevBalances[playerIdx][asset]));
+                    int128(uint128(rs.prevBalances[playerIdx][asset]));
                 console2.log(
                     string.concat(
                         '\t\t',
@@ -293,21 +308,35 @@ contract Match is Script {
                 );
             }
         }
+        {
+            console2.log('\n\x1b[1m\tMarket Supply\x1b[0m:');
+            string memory stringPrices = '\t\t';
+            for (uint8 asset; asset < rs.supply.length; ++asset) {
+                stringPrices = string.concat(
+                    stringPrices,
+                    _toAssetEmoji(asset),
+                    ': ',
+                    _toDecimals(rs.supply[asset]),
+                    asset < rs.supply.length - 1 ? ' ' : ''
+                );
+            }
+            console2.log(stringPrices);
+        }
         console2.log('\n\t======ROUND ACTIVITY======\n');
-        if (swaps.length == 0) {
+        if (rs.swaps.length == 0) {
             console2.log('\t\t<EMPTY BLOCK>');
         } else {
-            for (uint256 i; i < swaps.length; ++i) {
-                uint8 playerIdx = swaps[i].playerIdx;
+            for (uint256 i; i < rs.swaps.length; ++i) {
+                uint8 playerIdx = rs.swaps[i].playerIdx;
                 console2.log(string.concat(
                     '\t',
                     lastBuidlerIdx == playerIdx ? '(B) ' : '    ',
                     '\x1b[1m',
-                    players[playerIdx].name,
+                    rs.players[playerIdx].name,
                     '\x1b[0m sold:'
                 ));
-                for (; i < swaps.length; ++i) {
-                    SwapResult memory swap = swaps[i];
+                for (; i < rs.swaps.length; ++i) {
+                    SwapResult memory swap = rs.swaps[i];
                     if (swap.playerIdx != playerIdx) {
                         --i;
                         break;
@@ -386,7 +415,6 @@ contract Match is Script {
         uint256 frac = (weis - (whole * 1e18)) / 1e14;
         return string.concat(vm.toString(whole), '.', vm.toString(frac));
     }
-
 
     function _toDeltaDecimals(int128 delta)
         private pure returns (string memory dec)
