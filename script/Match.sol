@@ -315,9 +315,9 @@ contract Match is Script {
                 stringPrices = string.concat(
                     stringPrices,
                     _toAssetEmoji(asset),
-                    ': ',
+                    ' ',
                     _toDecimals(rs.supply[asset]),
-                    asset < rs.supply.length - 1 ? ' ' : ''
+                    asset < rs.supply.length - 1 ? ', ' : ''
                 );
             }
             console2.log(stringPrices);
