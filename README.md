@@ -51,7 +51,7 @@ Agents are smart contracts that expose [two callback functions](./src/game/IPlay
 	* If ANY swap in your bundle fails due to insufficient balance, the entire bundle fails, so beware!
 * `buildBlock(PlayerBundle[] bundles) -> uint256 bid`
     * Receives all bundles created by every agent, ordered by player index.
-    * Must settle (via `Game.settleBundle()`) *ALL but their own* bundles, in *any* order.
+    * Must settle (via `Game.settleBundle()`) ALL OTHER player bundles, in *any* order. Settiling the builder's own bundle is optional.
     * Can directly call swap functions on the `Game` instance (`sell()` or `buy()`).
     * Returns the agent's bid (in gold) to build this block. This gold will be burned if they win the block auction.
 
