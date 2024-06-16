@@ -290,7 +290,8 @@ contract Match is Script {
             ));
             for (uint8 asset; asset < assetCount; ++asset) {
                 uint256 bal = game.balanceOf(playerIdx, asset);
-                if (bal == 0) {
+                uint256 prevBal = rs.prevBalances[playerIdx][asset];
+                if (bal == 0 && prevBal == 0) {
                     continue;
                 }
                 int128 delta = int128(uint128(bal)) -
