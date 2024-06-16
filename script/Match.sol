@@ -323,14 +323,14 @@ contract Match is Script {
             }
             console2.log(stringPrices);
         }
-        console2.log('\n\t======ROUND ACTIVITY======\n');
+        console2.log('\n\t\t======ROUND ACTIVITY======\n');
         if (rs.swaps.length == 0) {
             console2.log('\t\t<EMPTY BLOCK>');
         } else {
             for (uint256 i; i < rs.swaps.length; ++i) {
                 uint8 playerIdx = rs.swaps[i].playerIdx;
                 console2.log(string.concat(
-                    '\t',
+                    '\t\t',
                     lastBuidlerIdx == playerIdx ? '(B) ' : '    ',
                     '\x1b[1m',
                     rs.players[playerIdx].name,
@@ -344,7 +344,7 @@ contract Match is Script {
                     }
                     console2.log(
                         string.concat(
-                            '\t\t',
+                            '\t\t\t',
                             _toAssetEmoji(swap.fromAssetIdx),
                             ' ',
                             _toDecimals(swap.fromAmount),
