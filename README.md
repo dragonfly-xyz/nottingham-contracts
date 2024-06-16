@@ -52,7 +52,7 @@ Agents are smart contracts that expose [two callback functions](./src/game/IPlay
 * `buildBlock(PlayerBundle[] bundles) -> uint256 bid`
     * Receives all bundles created by every agent, ordered by player index.
     * Must settle (via `Game.settleBundle()`) ALL OTHER player bundles, in *any* order. Settiling the builder's own bundle is optional.
-    * Can directly call swap functions on the `Game` instance (`sell()` or `buy()`).
+    * Can directly call swap functions on the `Game` instance (`sell()` or `buy()`) at any time, including between settling other player bundles.
     * Returns the agent's bid (in gold) to build this block. This gold will be burned if they win the block auction.
 
 ## Developing and Testing Agents
