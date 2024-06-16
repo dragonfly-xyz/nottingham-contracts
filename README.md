@@ -47,6 +47,7 @@ Agents are smart contracts that expose [two callback functions](./src/game/IPlay
 
 * `createBundle(uint8 builderIdx) -> PlayerBundle bundle`
     * Returns a `PlayerBundle` for the round, which consists of a sequence of swaps that must be executed by the block builder identified by `builderIdx`.
+	* Empty swaps will be ignored.
 	* If ANY swap in your bundle fails due to insufficient balance, the entire bundle fails, so beware!
 * `buildBlock(PlayerBundle[] bundles) -> uint256 bid`
     * Receives all bundles created by every agent, ordered by player index.
@@ -79,8 +80,11 @@ If successful, the output of either command will:
 - For each round:
 	- Print each agent's bid, ending balances, and change from last round.
     - Prefix the agent that built the block with `(B)`.
+	- If the agent's name is in red, one of their callbacks failed.
 	- Print the swaps that occured in that round, in order.
 - At the end of game, print the final score (max non-gold balance) for each agent.
+
+If an agent's name shows up in red it means it reverted during one of its callbacks.
 
 ```bash
 # ...
