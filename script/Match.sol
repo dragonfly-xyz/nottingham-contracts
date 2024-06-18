@@ -413,8 +413,17 @@ contract Match is Script {
         private pure returns (string memory dec)
     {
         uint256 whole = weis / 1e18;
-        uint256 frac = (weis - (whole * 1e18)) / 1e14;
-        return string.concat(vm.toString(whole), '.', vm.toString(frac));
+        uint256 frac = (weis - (whole * 1e18) + 1e18) / 1e14;
+        string memory fracStr = '0';
+        if (frac != 1e4) {
+            fracStr = vm.toString(frac);
+            assembly ("memory-safe") {
+                let len := mload(fracStr)
+                fracStr := add(fracStr, 1)
+                mstore(fracStr, sub(len, 1))
+            }
+        }
+        return string.concat(vm.toString(whole), '.', fracStr);
     }
 
     function _toDeltaDecimals(int128 delta)

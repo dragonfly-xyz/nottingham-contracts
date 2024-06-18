@@ -14,20 +14,14 @@ contract CheapBuyer is BasePlayer {
     {
         uint8 wantAssetIdx = _getMaxBuyableGood();
         bundle.swaps = new SwapSell[](ASSET_COUNT);
-        // Convert 99% of every other asset to the target asset and
-        // the remaining 1% to gold for our block bid.
+        // Convert every other asset except gold to the target asset.
         for (uint8 assetIdx; assetIdx < ASSET_COUNT; ++assetIdx) {
             if (assetIdx != wantAssetIdx && assetIdx != GOLD_IDX) {
                 uint256 bal = GAME.balanceOf(PLAYER_IDX, assetIdx);
                 bundle.swaps[assetIdx] = SwapSell({
                     fromAssetIdx: assetIdx,
                     toAssetIdx: wantAssetIdx,
-                    fromAmount: bal * 99 / 100
-                });
-                bundle.swaps[assetIdx] = SwapSell({
-                    fromAssetIdx: assetIdx,
-                    toAssetIdx: GOLD_IDX,
-                    fromAmount: bal * 1 / 100
+                    fromAmount: bal
                 });
             }
         }

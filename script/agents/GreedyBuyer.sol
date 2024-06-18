@@ -13,21 +13,15 @@ contract GreedyBuyer is BasePlayer {
         external virtual override returns (PlayerBundle memory bundle)
     {
         uint8 wantAssetIdx = _getMaxGood();
-        bundle.swaps = new SwapSell[](ASSET_COUNT);
-        // Convert 99% of every other asset to the target asset and
-        // the remaining 1% to gold for our block bid.
+        bundle.swaps = new SwapSell[](MAX_SWAPS_PER_BUNDLE);
+        // Convert every other asset to the target asset.
         for (uint8 assetIdx; assetIdx < ASSET_COUNT; ++assetIdx) {
             if (assetIdx != wantAssetIdx && assetIdx != GOLD_IDX) {
                 uint256 bal = GAME.balanceOf(PLAYER_IDX, assetIdx);
                 bundle.swaps[assetIdx] = SwapSell({
                     fromAssetIdx: assetIdx,
                     toAssetIdx: wantAssetIdx,
-                    fromAmount: bal * 99 / 100
-                });
-                bundle.swaps[assetIdx] = SwapSell({
-                    fromAssetIdx: assetIdx,
-                    toAssetIdx: GOLD_IDX,
-                    fromAmount: bal * 1 / 100
+                    fromAmount: bal
                 });
             }
         }

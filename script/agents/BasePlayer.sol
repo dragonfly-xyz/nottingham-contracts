@@ -17,6 +17,8 @@ contract BasePlayer is IPlayer {
     uint8 internal immutable ASSET_COUNT;
     // How many goods (assets that aren't gold) are in the game.
     uint8 internal immutable GOODS_COUNT;
+    // Maximum number of swaps allowed in a single player bundle.
+    uint8 internal immutable MAX_SWAPS_PER_BUNDLE;
     
     constructor(IGame game, uint8 playerIdx, uint8 playerCount, uint8 assetCount) {
         GAME = game;
@@ -24,6 +26,7 @@ contract BasePlayer is IPlayer {
         PLAYER_COUNT = playerCount;
         ASSET_COUNT = assetCount;
         GOODS_COUNT = ASSET_COUNT - 1;
+        MAX_SWAPS_PER_BUNDLE = ASSET_COUNT * (ASSET_COUNT - 1);
     }
 
     function createBundle(uint8 /* builderIdx */)
