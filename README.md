@@ -65,16 +65,16 @@ The project comes with some [example agent contracts](./script/agents/). None ar
 ### Local Matches
 The project comes with a foundry [script](./script/Match.sol) for running matches locally so you can see how well your bot performs against others. Matches can be held against 2 or more agent contracts. Note that production tournaments are always conducted with 4 agents.
 
-For example, you can run a match against the included example agents [`GreedyBuyer`](./script/agents/GreedyBuyer.sol) and [`CheapBuyer`](./script/agents/CheapBuyer.sol) with the following command:
+For example, you can run a match against the included example agents [`GreedyBuyer`](./script/agents/GreedyBuyer.sol), [`CheapBuyer`](./script/agents/CheapBuyer.sol), and [`CheapFrontRunner`](./script/agents/CheapFrontRunner.sol) with the following command:
 
 ```bash
-forge script Match --sig 'runMatch(string[])' '["GreedyBuyer", "CheapBuyer"]'
+forge script Match --sig 'runMatch(string[])' '["GreedyBuyer", "CheapBuyer", "CheapFrontRunner"]'
 ```
 
 `runMatch()` assigns agents the same player indexes in the same order that agent names are passed in. The performance of some of the example agents can be biased by their order in a match. You can instead use `runShuffledMatch()` to assign agents a random index each run:
 
 ```bash
-forge script Match --sig 'runShuffledMatch(string[])' '["GreedyBuyer", "CheapBuyer"]'
+forge script Match --sig 'runShuffledMatch(string[])' '["GreedyBuyer", "CheapBuyer", "CheapFrontRunner"]'
 ```
 
 If successful, the output of either command will:
