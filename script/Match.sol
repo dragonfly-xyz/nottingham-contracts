@@ -227,6 +227,12 @@ contract Match is Script {
                 }
                 if (sig == Game.Swap.selector) {
                     ++count;
+                } else if (log.topics[0] == Game.BundleSettled.selector) {
+                    (uint8 playerIdx, bool success) =
+                        abi.decode(log.data, (uint8, bool));
+                    if (!success) {
+                        ++count;
+                    }
                 }
             }
         }
@@ -245,6 +251,15 @@ contract Match is Script {
                         swap.toAmount
                     ) = abi.decode(log.data, (uint8, uint8, uint8, uint256, uint256));
                     swaps[pos++] = swap;
+                } else if (log.topics[0] == Game.BundleSettled.selector) {
+                    (uint8 playerIdx, bool success) =
+                        abi.decode(log.data, (uint8, bool));
+                    if (!success) {
+                        SwapResult memory swap;
+                        swap.playerIdx = playerIdx;
+                        swap.fromAssetIdx = INVALID_PLAYER_IDX;
+                        swaps[pos++] = swap;
+                    }
                 }
             }
         }
@@ -329,6 +344,16 @@ contract Match is Script {
         } else {
             for (uint256 i; i < rs.swaps.length; ++i) {
                 uint8 playerIdx = rs.swaps[i].playerIdx;
+                if (rs.swaps[i].fromAssetIdx == INVALID_PLAYER_IDX) {
+                    console2.log(string.concat(
+                        '\t\t',
+                        lastBuidlerIdx == playerIdx ? '(B) ' : '    ',
+                        '\x1b[1m',
+                        rs.players[playerIdx].name,
+                        '\'s \x1b[31mbundle failed!\x1b[0m'
+                    ));
+                    continue;
+                }
                 console2.log(string.concat(
                     '\t\t',
                     lastBuidlerIdx == playerIdx ? '(B) ' : '    ',
