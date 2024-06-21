@@ -6,6 +6,7 @@ import { SafeCreate2 } from '~/game/SafeCreate2.sol';
 import { GameDeployer } from '~/game/GameDeployer.sol';
 import { LibMatchUtils } from '~/game/LibMatchUtils.sol';
 import { LibBytes } from '~/game/LibBytes.sol';
+import { AssetMarket } from '~/game/Markets.sol';
 import { Script } from 'forge-std/Script.sol';
 import { console2 } from 'forge-std/console2.sol';
 import { Vm } from 'forge-std/Vm.sol';
@@ -472,6 +473,12 @@ contract Match is Script {
         }
         if (selector == Game.TooManySwapsError.selector) {
             return 'Too many swaps in bundle';
+        }
+        if (selector == AssetMarket.InsufficientLiquidityError.selector) {
+            return 'Insufficient liquidity';
+        }
+        if (selector == Game.AccessError.selector) {
+            return 'Access Error';
         }
         return vm.toString(errorData);
     }
