@@ -14,7 +14,7 @@ contract SimpleBuyer is BasePlayer {
     }
 
     function createBundle(uint8 /* builderIdx */)
-        external virtual override returns (PlayerBundle memory bundle)
+        public virtual override returns (PlayerBundle memory bundle)
     {
         bundle.swaps = new SwapSell[](ASSET_COUNT);
         // Convert all non-gold assets to target asset.

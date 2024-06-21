@@ -35,6 +35,25 @@ library LibBytes {
         }
     }
 
+    function slice(bytes memory buf, uint256 offset)
+        internal pure returns (bytes memory sliced)
+    {
+        return slice(buf, offset, buf.length);
+    }
+    function slice(bytes memory buf, uint256 offset, uint256 size)
+        internal pure returns (bytes memory sliced)
+    {
+        if (buf.length == 0 || offset >= buf.length) {
+            return "";
+        }
+        uint256 end = size + offset > buf.length ? buf.length : offset + size;
+        size = end - offset;
+        sliced = new bytes(size);
+        assembly ("memory-safe") {
+            mcopy(add(sliced, 0x20), add(buf, add(0x20, offset)), size)
+        }
+    }
+
     function rawRevert(bytes memory buf)
         internal pure
     {

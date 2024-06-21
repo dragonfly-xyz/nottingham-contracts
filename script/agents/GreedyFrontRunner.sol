@@ -11,7 +11,7 @@ contract GreedyFrontRunner is GreedyBuyer {
         GreedyBuyer(game, playerIdx, playerCount, assetCount) {}
 
     function createBundle(uint8 /* builderIdx */)
-        external virtual override returns (PlayerBundle memory bundle)
+        public virtual override returns (PlayerBundle memory bundle)
     {
         uint8 wantAssetIdx = _getMaxGood();
         bundle.swaps = new SwapSell[](MAX_SWAPS_PER_BUNDLE);
@@ -35,8 +35,8 @@ contract GreedyFrontRunner is GreedyBuyer {
         }
     }
 
-    function buildBlock(PlayerBundle[] memory bundles)
-        external virtual override returns (uint256 goldBid)
+    function buildBlock(PlayerBundle[] calldata bundles)
+        public virtual override returns (uint256 goldBid)
     {
         // Buy whatever asset we have the most of.
         uint8 wantAssetIdx = _getMaxGood();

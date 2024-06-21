@@ -28,7 +28,7 @@ uint256 constant PLAYER_CREATE_BUNDLE_GAS_BASE = 1e6;
 uint256 constant PLAYER_CREATE_BUNDLE_GAS_PER_PLAYER = 250e3;
 uint256 constant PLAYER_BUILD_BLOCK_GAS_BASE = 2e6;
 uint256 constant PLAYER_BUILD_BLOCK_GAS_PER_PLAYER = 500e3;
-uint256 constant MAX_RETURN_DATA_SIZE = 1300;
+uint256 constant MAX_RETURN_DATA_SIZE = 1400;
 uint256 constant MIN_GAS_PER_BUNDLE_SWAP = 10e3;
 // How much gold each player gets at the start of each round.
 uint256 constant GOLD_INCOME_AMOUNT = 1;

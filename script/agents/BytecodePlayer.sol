@@ -35,12 +35,12 @@ abstract contract BaseBytecodePlayer is IPlayer {
 
     // Just to shush the compiler.
     function createBundle(uint8 /* builderIdx */)
-        external virtual returns (PlayerBundle memory bundle)
+        public virtual returns (PlayerBundle memory bundle)
     {}
 
     // Just to shush the compiler.
     function buildBlock(PlayerBundle[] calldata bundles)
-        external virtual returns (uint256 goldBid)
+        public virtual returns (uint256 goldBid)
     {}
 }
 

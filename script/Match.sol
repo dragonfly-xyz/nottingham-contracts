@@ -5,11 +5,14 @@ import { Game, IPlayer, INVALID_PLAYER_IDX, MIN_PLAYERS, MAX_PLAYERS } from '~/g
 import { SafeCreate2 } from '~/game/SafeCreate2.sol';
 import { GameDeployer } from '~/game/GameDeployer.sol';
 import { LibMatchUtils } from '~/game/LibMatchUtils.sol';
+import { LibBytes } from '~/game/LibBytes.sol';
 import { Script } from 'forge-std/Script.sol';
 import { console2 } from 'forge-std/console2.sol';
 import { Vm } from 'forge-std/Vm.sol';
 
 contract Match is Script {
+    using LibBytes for bytes;
+
     struct PlayerInfo {
         string name;
         bytes creationCode;
@@ -30,8 +33,26 @@ contract Match is Script {
         uint256 toAmount;
     }
 
+    struct RoundState {
+        PlayerInfo[] players;
+        uint256[] bids;
+        uint256[][] prevBalances;
+        SwapResult[] swaps;
+        uint256[] supply;
+        RoundFailureInfo[] failures;
+    }
+
+    struct RoundFailureInfo {
+        uint8 flags;
+        bytes buildBlockRevertData;
+        bytes createBundleRevertData;
+    }
+
     uint8 constant FAILED_BUNDLE_FLAG = 0x1;
     uint8 constant FAILED_BLOCK_FLAG = 0x2;
+
+    bytes4 ERROR_SELECTOR = bytes4(keccak256('Error(string)'));
+    bytes4 PANIC_SELECTOR = bytes4(keccak256('Panic(uint256)'));
 
     SafeCreate2 sc2;
 
@@ -122,10 +143,11 @@ contract Match is Script {
                 logs,
                 uint8(players.length)
             );
-            rs.failFlags = _extractFailures(
+            rs.failures = _extractFailures(
                 game,
                 logs,
-                uint8(players.length)
+                uint8(players.length),
+                game.lastBuilder()
             );
             rs.swaps = _extractSwaps(game, logs);
             rs.supply = game.marketState();
@@ -184,21 +206,28 @@ contract Match is Script {
     function _extractFailures(
         Game game,
         Vm.Log[] memory logs,
-        uint8 playerCount
+        uint8 playerCount,
+        uint8 roundBuilder
     )
-        private returns (uint8[] memory failures)
+        private returns (RoundFailureInfo[] memory failures)
     {
-        failures = new uint8[](playerCount);
+        failures = new RoundFailureInfo[](playerCount);
         for (uint256 i; i < logs.length; ++i) {
             Vm.Log memory log = logs[i];
             if (log.emitter == address(game) && log.topics.length == 1) {
                 bytes32 sig = log.topics[0];
                 if (sig == Game.CreateBundleFailed.selector) {
-                    (uint8 playerIdx) = abi.decode(log.data, (uint8));
-                    failures[playerIdx] |= FAILED_BUNDLE_FLAG;
+                    (uint8 playerIdx, uint8 builderIdx, bytes memory revertData) =
+                        abi.decode(log.data, (uint8, uint8, bytes));
+                    if (builderIdx == roundBuilder) {
+                        failures[playerIdx].flags |= FAILED_BUNDLE_FLAG;
+                        failures[playerIdx].createBundleRevertData = revertData;
+                    }
                 } else if (sig == Game.BuildPlayerBlockFailed.selector) {
-                    (uint8 playerIdx) = abi.decode(log.data, (uint8));
-                    failures[playerIdx] |= FAILED_BLOCK_FLAG;
+                    (uint8 playerIdx, bytes memory revertData) =
+                        abi.decode(log.data, (uint8, bytes));
+                    failures[playerIdx].flags |= FAILED_BLOCK_FLAG;    
+                    failures[playerIdx].buildBlockRevertData = revertData;
                 }
             }
         }
@@ -228,7 +257,7 @@ contract Match is Script {
                 if (sig == Game.Swap.selector) {
                     ++count;
                 } else if (log.topics[0] == Game.BundleSettled.selector) {
-                    (uint8 playerIdx, bool success) =
+                    (, bool success) =
                         abi.decode(log.data, (uint8, bool));
                     if (!success) {
                         ++count;
@@ -265,15 +294,6 @@ contract Match is Script {
         }
     }
 
-    struct RoundState {
-        PlayerInfo[] players;
-        uint256[] bids;
-        uint256[][] prevBalances;
-        SwapResult[] swaps;
-        uint256[] supply;
-        uint8[] failFlags;
-    }
-
     function _printRoundState(
         Game game,
         RoundState memory rs 
@@ -287,7 +307,7 @@ contract Match is Script {
             console2.log(string.concat(
                 '\t',
                 lastBuidlerIdx == ranking[i] ? '(B) ' : '   ',
-                rs.failFlags[playerIdx] != 0 ? '\x1b[31m' : '\x1b[1m',
+                rs.failures[playerIdx].flags != 0 ? '\x1b[31m' : '\x1b[1m',
                 rs.players[playerIdx].name,
                 '\x1b[0m [',
                 vm.toString(playerIdx),
@@ -303,6 +323,13 @@ contract Match is Script {
                     ),
                 ':'
             ));
+            if (rs.failures[playerIdx].flags & FAILED_BLOCK_FLAG != 0) {
+                console2.log(string.concat(
+                    unicode'\t\t⚠️  \x1b[31mFailed to build block with error: ',
+                    _humanizeErrorData(rs.failures[playerIdx].buildBlockRevertData),
+                    '\x1b[1m'
+                ));
+            }
             for (uint8 asset; asset < assetCount; ++asset) {
                 uint256 bal = game.balanceOf(playerIdx, asset);
                 uint256 prevBal = rs.prevBalances[playerIdx][asset];
@@ -339,6 +366,18 @@ contract Match is Script {
             console2.log(stringPrices);
         }
         console2.log('\n\t\t======ROUND ACTIVITY======\n');
+        for (uint8 playerIdx; playerIdx < rs.players.length; ++playerIdx) {
+            if (rs.failures[playerIdx].flags & FAILED_BUNDLE_FLAG != 0) {
+                console2.log(string.concat(
+                    unicode'\t\t\x1b[31m ⚠️  ',
+                    rs.players[playerIdx].name,
+                    ' failed to create bundle with error: ',
+                    _humanizeErrorData(rs.failures[playerIdx].createBundleRevertData),
+                    '\x1b[0m'
+                ));
+            }
+        }
+        console2.log('');
         if (rs.swaps.length == 0) {
             console2.log('\t\t<EMPTY BLOCK>');
         } else {
@@ -373,7 +412,7 @@ contract Match is Script {
                             _toAssetEmoji(swap.fromAssetIdx),
                             ' ',
                             _toDecimals(swap.fromAmount),
-                            ' -> ',
+                            unicode' ⇾ ',
                             _toAssetEmoji(swap.toAssetIdx),
                             ' ',
                             _toDecimals(swap.toAmount)
@@ -382,6 +421,59 @@ contract Match is Script {
                 }
             }
         }
+    }
+
+    function _humanizeErrorData(bytes memory errorData)
+        private returns (string memory s)
+    {
+        bytes4 selector = errorData.getSelectorOr(bytes4(0));
+        if (selector == ERROR_SELECTOR) {
+            return abi.decode(errorData.slice(4), (string));
+        }
+        if (selector == PANIC_SELECTOR) {
+            uint256 code = abi.decode(errorData.slice(4), (uint256));
+            if (code == 0x01) {
+                return 'assert failed';
+            }
+            if (code == 0x02) {
+                return 'under/overflow';
+            }
+            if (code == 0x12) {
+                return 'division by zero';
+            }
+            if (code == 0x21) {
+                return 'conversion error';
+            }
+            if (code == 0x31) {
+                return 'pop empty array';
+            }
+            if (code == 0x32) {
+                return 'out of bounds';
+            }
+            return 'panic';
+        }
+        if (selector == Game.BuildBlockFailedError.selector) {
+            (, bytes memory innerData) = abi.decode(errorData.slice(4), (uint8, bytes));
+            return _humanizeErrorData(innerData);
+        }
+        if (selector == Game.BundleNotSettledError.selector) {
+            (, uint8 bundleIdx) = abi.decode(errorData.slice(4), (uint8, uint8));
+            return string.concat(
+                'Did not settle bundle ',
+                vm.toString(bundleIdx)
+            );
+        }
+        if (selector == Game.InsufficientBalanceError.selector) {
+            (, uint8 assetIdx) = abi.decode(errorData.slice(4), (uint8, uint8));
+            return string.concat(
+                'Insufficient balance of asset ',
+                _toAssetEmoji(assetIdx)
+            );
+        }
+        if (selector == Game.TooManySwapsError.selector) {
+            return 'Too many swaps in bundle';
+        }
+        return vm.toString(errorData);
     }
 
     function _printFinalScores(

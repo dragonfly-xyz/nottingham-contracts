@@ -11,7 +11,7 @@ contract CheapFrontRunner is CheapBuyer {
         CheapBuyer(game, playerIdx, playerCount, assetCount) {}
 
     function createBundle(uint8 /* builderIdx */)
-        external virtual override returns (PlayerBundle memory bundle)
+        public virtual override returns (PlayerBundle memory bundle)
     {
         uint8 wantAssetIdx = _getMaxBuyableGood();
         bundle.swaps = new SwapSell[](MAX_SWAPS_PER_BUNDLE);
@@ -35,8 +35,8 @@ contract CheapFrontRunner is CheapBuyer {
         }
     }
 
-    function buildBlock(PlayerBundle[] memory bundles)
-        external virtual override returns (uint256 goldBid)
+    function buildBlock(PlayerBundle[] calldata bundles)
+        public virtual override returns (uint256 goldBid)
     {
         // Buy whatever asset we can get the most of.
         uint8 wantAssetIdx = _getMaxBuyableGood();
