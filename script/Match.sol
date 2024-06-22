@@ -328,7 +328,7 @@ contract Match is Script {
                 console2.log(string.concat(
                     unicode'\t\t⚠️  \x1b[31mFailed to build block with error: ',
                     _humanizeErrorData(rs.failures[playerIdx].buildBlockRevertData),
-                    '\x1b[1m'
+                    '\x1b[0m'
                 ));
             }
             for (uint8 asset; asset < assetCount; ++asset) {
