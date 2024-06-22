@@ -384,16 +384,6 @@ contract Match is Script {
         } else {
             for (uint256 i; i < rs.swaps.length; ++i) {
                 uint8 playerIdx = rs.swaps[i].playerIdx;
-                if (rs.swaps[i].fromAssetIdx == INVALID_PLAYER_IDX) {
-                    console2.log(string.concat(
-                        '\t\t',
-                        lastBuidlerIdx == playerIdx ? '(B) ' : '    ',
-                        '\x1b[1m',
-                        rs.players[playerIdx].name,
-                        '\'s \x1b[31mbundle failed!\x1b[0m'
-                    ));
-                    continue;
-                }
                 console2.log(string.concat(
                     '\t\t',
                     lastBuidlerIdx == playerIdx ? '(B) ' : '    ',
@@ -407,18 +397,25 @@ contract Match is Script {
                         --i;
                         break;
                     }
-                    console2.log(
-                        string.concat(
+                    if (swap.fromAssetIdx == INVALID_PLAYER_IDX) {
+                        console2.log(string.concat(
                             '\t\t\t',
-                            _toAssetEmoji(swap.fromAssetIdx),
-                            ' ',
-                            _toDecimals(swap.fromAmount),
-                            unicode' ⇾ ',
-                            _toAssetEmoji(swap.toAssetIdx),
-                            ' ',
-                            _toDecimals(swap.toAmount)
-                        )
-                    );
+                            '\x1b[31mBundle failed!\x1b[0m'
+                        ));
+                    } else {
+                        console2.log(
+                            string.concat(
+                                '\t\t\t',
+                                _toAssetEmoji(swap.fromAssetIdx),
+                                ' ',
+                                _toDecimals(swap.fromAmount),
+                                unicode' ⇾ ',
+                                _toAssetEmoji(swap.toAssetIdx),
+                                ' ',
+                                _toDecimals(swap.toAmount)
+                            )
+                        );
+                    }
                 }
             }
         }
