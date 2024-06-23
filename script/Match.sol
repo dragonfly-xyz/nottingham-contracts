@@ -433,7 +433,7 @@ contract Match is Script {
             if (code == 0x01) {
                 return 'assert failed';
             }
-            if (code == 0x02) {
+            if (code == 0x11) {
                 return 'under/overflow';
             }
             if (code == 0x12) {
