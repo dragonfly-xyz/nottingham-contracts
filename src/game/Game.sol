@@ -77,6 +77,7 @@ contract Game is IGame, AssetMarket {
     event PlayerBlockGasUsage(uint8 builderIdx, uint32 gasUsed);
     event PlayerBundleGasUsage(uint8 builderIdx, uint32 gasUsed);
     event BundleSettled(uint8 playerIdx, bool success, PlayerBundle bundle);
+    event Leaked(uint8 assetIdx, uint256 assetAmount);
 
     modifier onlyGameMaster() {
         require(msg.sender == gm, AccessError());
@@ -374,10 +375,9 @@ contract Game is IGame, AssetMarket {
     /// @dev Remove a fraction of goods from the market.
     function _leakGoods() private {
         for (uint8 assetIdx = FIRST_GOOD_IDX; assetIdx < ASSET_COUNT; ++assetIdx) {
-            AssetMarket._leak(
-                assetIdx,
-                AssetMarket._getReserve(assetIdx) * RESERVE_LEAK_RATE / 1e4
-            );
+            uint256 leakAmount = AssetMarket._getReserve(assetIdx) * RESERVE_LEAK_RATE / 1e4;
+            AssetMarket._leak(assetIdx, leakAmount);
+            emit Leaked(assetIdx, leakAmount);
         }
     }
 

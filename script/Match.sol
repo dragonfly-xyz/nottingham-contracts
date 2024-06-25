@@ -34,6 +34,11 @@ contract Match is Script {
         uint256 toAmount;
     }
 
+    struct Leak {
+        uint8 assetIdx;
+        uint256 assetAmount;
+    }
+
     struct RoundState {
         PlayerInfo[] players;
         uint256[] bids;
@@ -41,6 +46,7 @@ contract Match is Script {
         SwapResult[] swaps;
         uint256[] supply;
         RoundFailureInfo[] failures;
+        Leak[] leaks;
     }
 
     struct RoundFailureInfo {
@@ -150,6 +156,7 @@ contract Match is Script {
                 uint8(players.length),
                 game.lastBuilder()
             );
+            rs.leaks = _extractLeaks(game, logs);
             rs.swaps = _extractSwaps(game, logs);
             rs.supply = game.marketState();
             rs.prevBalances = prevBalances;
@@ -230,6 +237,37 @@ contract Match is Script {
                     failures[playerIdx].flags |= FAILED_BLOCK_FLAG;    
                     failures[playerIdx].buildBlockRevertData = revertData;
                 }
+            }
+        }
+    }
+
+    function _extractLeaks(Game game, Vm.Log[] memory logs)
+        private returns (Leak[] memory leaks)
+    {
+        uint256 count;
+        for (uint256 i; i < logs.length; ++i) {
+            Vm.Log memory log = logs[i];
+            if (log.emitter == address(game) && log.topics.length == 1) {
+                bytes32 sig = log.topics[0];
+                if (sig != Game.Leaked.selector) {
+                    continue;
+                }
+                ++count;
+            }
+        }
+        leaks = new Leak[](count);
+        uint256 o;
+        for (uint256 i; i < logs.length; ++i) {
+            Vm.Log memory log = logs[i];
+            if (log.emitter == address(game) && log.topics.length == 1) {
+                bytes32 sig = log.topics[0];
+                if (sig != Game.Leaked.selector) {
+                    continue;
+                }
+                Leak memory leak;
+                (leak.assetIdx, leak.assetAmount) =
+                    abi.decode(log.data, (uint8, uint256));
+                leaks[o++] = leak;
             }
         }
     }
@@ -418,6 +456,21 @@ contract Match is Script {
                     }
                 }
             }
+        }
+        if (rs.leaks.length != 0) {
+            string memory s = unicode'\n\t\t🔥 Burned ';
+            for (uint256 i; i < rs.leaks.length; ++i) {
+                Leak memory leak = rs.leaks[i];
+                s = string.concat(
+                    s,
+                    _toAssetEmoji(leak.assetIdx),
+                    ' ',
+                    _toDecimals(leak.assetAmount),
+                    i == rs.leaks.length - 1 ? '' : ', '
+                );
+            }
+            s = string.concat(s, ' from the market');
+            console2.log(s);
         }
     }
 
