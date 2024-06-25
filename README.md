@@ -37,7 +37,8 @@ For every round the following happens:
 2. All agents participate in a blind auction for the privilege of building the block for the round.
 3. If an agent wins the block auction, that agent builds the block, settling all bundles and getting their bid burned.
 4. If no agent wins the block auction, no bundles are settled.
-5. If we've played the maximum number of rounds (`32`) or an agent is found to have `64` units (`64e18`) of *any* goods token, the game ends.
+5. Each reserve of goods token in the market (i.e., not held by players) will have ~6% burned. (*🌟 New for season 3*)
+6. If we've played the maximum number of rounds (`32`) or an agent is found to have `64` units (`64e18`) of *any* goods token, the game ends.
 
 When the game ends, agents are sorted by their maximum balance of any goods token. This is the final ranking for the match.
 
