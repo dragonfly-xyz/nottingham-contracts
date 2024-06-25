@@ -231,6 +231,7 @@ contract Game is IGame, AssetMarket {
         require(round_ < MAX_ROUNDS, GameOverError());
         _resupply();
         _buildBlock();
+        _leakGoods();
         emit RoundPlayed(round_);
         {
             IPlayer winner = _findWinner(round_ + 1);
@@ -368,6 +369,16 @@ contract Game is IGame, AssetMarket {
     /// @dev Esnure an asset index is valid.
     function _assertValidAsset(uint8 assetIdx) private view {
         require(assetIdx < ASSET_COUNT, InvalidAssetError());
+    }
+
+    /// @dev Remove a fraction of goods from the market.
+    function _leakGoods() private {
+        for (uint8 assetIdx = FIRST_GOOD_IDX; assetIdx < ASSET_COUNT; ++assetIdx) {
+            AssetMarket._leak(
+                assetIdx,
+                AssetMarket._getReserve(assetIdx) * RESERVE_LEAK_RATE / 1e4
+            );
+        }
     }
 
     /// @dev Asks each player to create a bundle for the round under

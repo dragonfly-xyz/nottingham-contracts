@@ -18,10 +18,10 @@ uint8 constant MAX_ROUNDS = 32;
 uint256 constant MIN_WINNING_ASSET_BALANCE = 64e18;
 // How much gold the market starts with at the beginning of the game,
 // to be multiplied with the number of players.
-uint256 constant MARKET_STARTING_GOLD_PER_PLAYER = 1e18;
+uint256 constant MARKET_STARTING_GOLD_PER_PLAYER = 4e18;
 // How much of every good the market starts with at the beginning of the game,
 // to be multiplied with the number of players.
-uint256 constant MARKET_STARTING_GOODS_PER_PLAYER = 8e18;
+uint256 constant MARKET_STARTING_GOODS_PER_PLAYER = 64e18;
 uint8 constant INVALID_PLAYER_IDX = type(uint8).max;
 uint256 constant MAX_CREATION_GAS = 200 * 0x8000 + 1e6;
 uint256 constant PLAYER_CREATE_BUNDLE_GAS_BASE = 1e6;
@@ -34,3 +34,5 @@ uint256 constant MIN_GAS_PER_BUNDLE_SWAP = 10e3;
 uint256 constant GOLD_INCOME_AMOUNT = 1;
 // How much of every goods each player gets at the start of each round.
 uint256 constant GOODS_INCOME_AMOUNT = 1e18;
+// What fraction (in bps) of goods are burned from the market each round.
+uint16 constant RESERVE_LEAK_RATE = 0.0629e4;

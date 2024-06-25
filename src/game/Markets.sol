@@ -60,6 +60,14 @@ abstract contract AssetMarket {
         _reserves[toIdx] = reserves[toIdx];
     }
 
+    function _leak(uint8 idx, uint256 amt) internal {
+        if (idx >= ASSET_COUNT) revert InvalidAssetError();
+        uint256 toReserve = _getReserve(idx);
+        if (amt >= toReserve) revert InsufficientLiquidityError();
+        if (toReserve - amt < MIN_LIQUIDITY_PER_RESERVE) revert MinLiquidityError();
+        _reserves[idx] = toReserve - amt;
+    }
+
     function _getReserve(uint8 idx) internal view returns (uint256 weiReserve) {
         return _reserves[idx];
     }
