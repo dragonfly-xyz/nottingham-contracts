@@ -64,6 +64,7 @@ contract Game is IGame, AssetMarket {
     
     event CreatePlayerFailed(uint8 playerIdx);
     event RoundPlayed(uint16 round);
+    event MarketInitialized(uint256[] reserves);
     event CreateBundleFailed(uint8 playerIdx, uint8 builderIdx, bytes revertData);
     event Mint(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount);
     event Burn(uint8 playerIdx, uint8 assetIdx, uint256 assetAmount);
@@ -158,6 +159,7 @@ contract Game is IGame, AssetMarket {
                 assetReserves[i] = MARKET_STARTING_GOODS_PER_PLAYER * playerCount;
             }
             AssetMarket._init(assetReserves);
+            emit MarketInitialized(assetReserves);
         }
     }
 
