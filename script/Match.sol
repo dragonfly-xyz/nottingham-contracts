@@ -510,8 +510,15 @@ contract Match is Script {
         if (selector == Game.BundleNotSettledError.selector) {
             (, uint8 bundleIdx) = abi.decode(errorData.slice(4), (uint8, uint8));
             return string.concat(
-                'Did not settle bundle ',
+                'Did not settle bundle: ',
                 vm.toString(bundleIdx)
+            );
+        }
+        if (selector == Game.BundleAlreadySettledError.selector) {
+            (uint8 playerIdx) = abi.decode(errorData.slice(4), (uint8));
+            return string.concat(
+                'Bundle already settled: ',
+                vm.toString(playerIdx)
             );
         }
         if (selector == Game.InsufficientBalanceError.selector) {
